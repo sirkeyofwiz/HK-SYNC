@@ -1,0 +1,19 @@
+{
+  "name": "HK SYNC - Housekeeping Operations",
+  "short_name": "HK SYNC",
+  "description": "Housekeeping, perfectly sychronised",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f4f6f3",
+  "theme_color": "#172b46",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

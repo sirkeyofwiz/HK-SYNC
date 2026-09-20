@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: bahari-operations-api
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CLIENT_URL
+        sync: false
+    disk:
+      name: bahari-operations-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
+
+  - type: static
+    name: bahari-operations-web
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_URL
+        value: https://bahari-operations-api.onrender.com
