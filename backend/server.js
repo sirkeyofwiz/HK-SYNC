@@ -14,8 +14,16 @@ dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const dataFilePath = path.join(__dirname, 'data', 'db.json');
-const databasePath = path.join(__dirname, 'data', 'bahari.sqlite');
+// Use Railway's mounted volume in production, local ./data folder in dev
+const DATA_DIR = process.env.RAILWAY_VOLUME_MOUNT_PATH || path.join(__dirname, 'data');
+
+// Make sure the directory exists (Railway volume starts empty)
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+const dataFilePath = path.join(DATA_DIR, 'db.json');
+const databasePath = path.join(DATA_DIR, 'bahari.sqlite');
 const database = new Database(databasePath);
 database.pragma('journal_mode = WAL');
 database.exec(`
