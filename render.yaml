@@ -18,6 +18,7 @@ services:
       sizeGB: 1
 
   - type: web
+    runtime: static
     name: bahari-operations-web
     rootDir: frontend
     buildCommand: npm install && npm run build
