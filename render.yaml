@@ -17,7 +17,7 @@ services:
       mountPath: /opt/render/project/src/data
       sizeGB: 1
 
-  - type: static
+  - type: web
     name: bahari-operations-web
     rootDir: frontend
     buildCommand: npm install && npm run build
