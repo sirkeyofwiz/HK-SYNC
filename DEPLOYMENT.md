@@ -1,4 +1,4 @@
-# Bahari Operations deployment
+# HK SYNC deployment
 
 ## Render
 

@@ -27,7 +27,7 @@ database.exec(`
 const app = express();
 const allowedOrigins = (process.env.CLIENT_URL || 'http://localhost:5173,http://127.0.0.1:5173').split(',').map((origin) => origin.trim()).filter(Boolean);
 const server = app.listen(process.env.PORT || 5000, () => {
-  console.log(`Bahari Operations backend running on port ${process.env.PORT || 5000}`);
+  console.log(`HK SYNC backend running on port ${process.env.PORT || 5000}`);
 });
 
 const io = new Server(server, {
@@ -173,7 +173,7 @@ function authMiddleware(req, res, next) {
 }
 
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, message: 'Bahari Operations backend is running.' });
+  res.json({ ok: true, message: 'HK SYNC backend is running.' });
 });
 
 app.post('/api/auth/register', async (req, res) => {
