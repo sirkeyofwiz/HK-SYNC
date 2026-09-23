@@ -8,7 +8,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { Server } from 'socket.io';
 import Database from 'better-sqlite3';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
 dotenv.config();
 
@@ -34,17 +34,6 @@ database.exec(`
 `);
 const app = express();
 const allowedOrigins = (process.env.CLIENT_URL || 'http://localhost:5173,http://127.0.0.1:5173').split(',').map((origin) => origin.trim()).filter(Boolean);
-const server = app.listen(process.env.PORT || 5000, () => {
-  console.log(`HK SYNC backend running on port ${process.env.PORT || 5000}`);
-});
-
-const io = new Server(server, {
-  cors: {
-    origin: allowedOrigins,
-    methods: ['GET', 'POST']
-  }
-});
-
 app.use(cors({
   origin: allowedOrigins,
   credentials: true,
@@ -94,6 +83,33 @@ function saveState() {
   });
   persist();
 }
+
+if (!state.users || state.users.length === 0) {
+  state.users = [{
+    id: randomUUID(),
+    name: 'Manager',
+    email: 'manager@bahari.local',
+    avatar: 'https://ui-avatars.com/api/?name=Manager&background=2563eb&color=fff',
+    role: 'manager',
+    password: await bcrypt.hash('password123', 10),
+    active: true,
+    status: 'offline',
+    createdAt: new Date().toISOString(),
+  }];
+  saveState();
+  console.log('Seeded default manager: manager@bahari.local / password123');
+}
+
+const server = app.listen(process.env.PORT || 5000, () => {
+  console.log(`HK SYNC backend running on port ${process.env.PORT || 5000}`);
+});
+
+const io = new Server(server, {
+  cors: {
+    origin: allowedOrigins,
+    methods: ['GET', 'POST']
+  }
+});
 
 function createToken(user) {
   return jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
