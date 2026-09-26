@@ -1,0 +1,23 @@
+:{$PORT:3000}
+root * dist
+encode gzip
+
+# Never cache the main HTML file
+@html {
+    path /index.html
+    path /
+}
+header @html {
+    Cache-Control "no-cache, no-store, must-revalidate"
+}
+
+# Aggressively cache hashed assets (immutable is safe here)
+@assets {
+    path /assets/*
+}
+header @assets {
+    Cache-Control "public, max-age=31536000, immutable"
+}
+
+file_server
+try_files {path} /index.html
