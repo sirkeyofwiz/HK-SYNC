@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { utils, writeFileXLSX } from 'xlsx';
 import { jsPDF } from 'jspdf';
 
-const API = `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api`;
+const API_ORIGIN = import.meta.env.PROD ? 'https://bahari-operations-api-production.up.railway.app' : (import.meta.env.VITE_API_URL || 'http://localhost:5000');
+const API = `${API_ORIGIN}/api`;
 const TYPES = { neglected: 'Neglected Area', quality: 'Quality Checklist', trolley_pantry: 'Trolley / Pantry', handover: 'Shift Handover', vehicle: 'Vehicle Checklist', tools: 'Tools Control' };
 const QUALITY = ['Doors / balcony', 'Wardrobe', 'Minibar / cabinet', 'Kettle / tray', 'Bench / tables', 'Fan / AC', 'Bed / phone', 'Wall decor / lamp', 'Curtains', 'Armchair / carpet', 'Desk / TV', 'Mirror / glass', 'Counter / sink', 'Shower', 'Towel holder', 'Toilet / WC', 'Floor / skirting'];
 const VEHICLE = ['Tyres', 'Brakes', 'Lights', 'Horn', 'Mirrors', 'Cleanliness', 'Fuel / charge', 'Body condition', 'Steering', 'First aid kit'];
