@@ -33,7 +33,10 @@ database.exec(`
   CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, data TEXT NOT NULL);
 `);
 const app = express();
-const allowedOrigins = (process.env.CLIENT_URL || 'http://localhost:5173,http://127.0.0.1:5173').split(',').map((origin) => origin.trim()).filter(Boolean);
+const allowedOrigins = [...new Set([
+  ...(process.env.CLIENT_URL || 'http://localhost:5173,http://127.0.0.1:5173').split(',').map((origin) => origin.trim()).filter(Boolean),
+  'https://bahari-operations-web-production.up.railway.app'
+])];
 app.use(cors({
   origin: allowedOrigins,
   credentials: true,
