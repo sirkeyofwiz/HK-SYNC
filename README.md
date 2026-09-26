@@ -1,6 +1,6 @@
 # HK SYNC
 
-HK SYNC is the housekeeping operations command centre for TUI Blue Bahari Zanzibar. It brings inspections, shift handovers, vehicle and tools checks, follow-up tasks, and staff performance into one place.
+HK-SYNC is a housekeeping operations command centre. It brings inspections, shift handovers, vehicle and tools checks, follow-up tasks, and staff performance into one place.
 
 ## Features
 
