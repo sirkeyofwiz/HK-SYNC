@@ -239,9 +239,14 @@ function recordLoginFailure(key) {
 
 setInterval(() => loginFailures.forEach((entry, key) => failuresFor(key)), LOGIN_WINDOW_MS).unref();
 
+// Railway's edge documents X-Real-IP as the client address; elsewhere (Render, local) rely on trust proxy + req.ip.
+function clientIp(req) {
+  return (process.env.RAILWAY_ENVIRONMENT && req.get('x-real-ip')) || req.ip;
+}
+
 app.post('/api/auth/login', async (req, res) => {
   const accountKey = `account:${String(req.body?.email || '').trim().toLowerCase()}`;
-  const ipKey = `ip:${req.ip}`;
+  const ipKey = `ip:${clientIp(req)}`;
   const blocked = [[accountKey, LOGIN_LIMITS.account], [ipKey, LOGIN_LIMITS.ip]]
     .map(([key, limit]) => failuresFor(key)?.count >= limit ? failuresFor(key) : null)
     .find(Boolean);
