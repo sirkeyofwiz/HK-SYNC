@@ -277,6 +277,23 @@ app.get('/api/users/me', authMiddleware, (req, res) => {
   return res.json({ user: sanitizeUser(user) });
 });
 
+app.post('/api/users/me/password', authMiddleware, async (req, res) => {
+  const { currentPassword, newPassword } = req.body || {};
+  if (!currentPassword || typeof newPassword !== 'string' || newPassword.length < 8) {
+    return res.status(400).json({ message: 'Your current password and a new password of at least 8 characters are required.' });
+  }
+  const user = currentUser(req);
+  if (!user) return res.status(404).json({ message: 'User not found.' });
+  if (!(await bcrypt.compare(currentPassword, user.password))) {
+    return res.status(400).json({ message: 'Your current password is incorrect.' });
+  }
+  user.password = await bcrypt.hash(newPassword, 10);
+  delete user.resetTokenHash;
+  delete user.resetTokenExpiresAt;
+  saveState();
+  return res.json({ message: 'Password changed.' });
+});
+
 app.get('/api/users', authMiddleware, (req, res) => {
   const { q = '' } = req.query;
   const term = String(q).trim().toLowerCase();
@@ -391,6 +408,24 @@ app.post('/api/tasks', authMiddleware, requireManager, (req, res) => {
   state.tasks.push(task);
   saveState();
   return res.status(201).json({ task });
+});
+
+app.patch('/api/tasks/:id/status', authMiddleware, (req, res) => {
+  const { status } = req.body || {};
+  if (!['pending', 'in_progress', 'completed'].includes(status)) {
+    return res.status(400).json({ message: 'Status must be pending, in_progress or completed.' });
+  }
+  const task = state.tasks.find((entry) => entry.id === req.params.id);
+  if (!task) return res.status(404).json({ message: 'Task not found.' });
+  const isManager = ['manager', 'assistant_manager'].includes(currentUser(req)?.role);
+  if (!isManager && task.assignedTo !== req.user.id) {
+    return res.status(403).json({ message: 'Only the assigned staff member or a manager can update this task.' });
+  }
+  task.status = status;
+  task.updatedAt = new Date().toISOString();
+  task.completedAt = status === 'completed' ? task.updatedAt : null;
+  saveState();
+  return res.json({ task });
 });
 
 app.get('/api/messages/:userId', authMiddleware, (req, res) => {
