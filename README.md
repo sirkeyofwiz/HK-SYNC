@@ -74,7 +74,7 @@ The backend uses these environment variables:
 
 The frontend uses:
 
-- `VITE_API_URL` - public API origin, without the `/api` suffix (development only; production builds currently use the Railway API URL in `frontend/src/App.jsx`)
+- `VITE_API_URL` - public API origin, without the `/api` suffix (production builds fall back to the Railway API URL if it is unset)
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for the Render setup and SQLite persistent-disk requirements.
 
