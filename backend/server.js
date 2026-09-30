@@ -76,15 +76,11 @@ function readState() {
 
 let state = readState();
 
-function saveState() {
-  const persist = database.transaction(() => {
-    for (const table of ['users', 'messages', 'reports', 'tasks']) {
-      database.prepare(`DELETE FROM ${table}`).run();
-      const insert = database.prepare(`INSERT INTO ${table} (id, data) VALUES (?, ?)`);
-      state[table].forEach((row) => insert.run(row.id, JSON.stringify(row)));
-    }
-  });
-  persist();
+const upsertStatements = Object.fromEntries(['users', 'messages', 'reports', 'tasks'].map((table) => [table, database.prepare(`INSERT OR REPLACE INTO ${table} (id, data) VALUES (?, ?)`)]));
+
+// Persist only the row that changed; rewriting whole tables on every update gets slow as reports and photos accumulate.
+function saveRow(table, row) {
+  upsertStatements[table].run(row.id, JSON.stringify(row));
 }
 
 if (!state.users || state.users.length === 0) {
@@ -101,7 +97,7 @@ if (!state.users || state.users.length === 0) {
     status: 'offline',
     createdAt: new Date().toISOString(),
   }];
-  saveState();
+  saveRow('users', state.users[0]);
   console.log(process.env.SEED_MANAGER_PASSWORD
     ? 'Seeded default manager: manager@bahari.local (password from SEED_MANAGER_PASSWORD)'
     : `Seeded default manager: manager@bahari.local / ${seedPassword}`);
@@ -175,6 +171,12 @@ function reportSummary(report) {
   };
 }
 
+function withoutPhotos(data) {
+  if (!data) return data;
+  const strip = (entries) => Array.isArray(entries) ? entries.map(({ photo, ...entry }) => ({ ...entry, hasPhoto: Boolean(photo) })) : entries;
+  return { ...data, entries: strip(data.entries), trolleys: strip(data.trolleys), pantries: strip(data.pantries) };
+}
+
 function buildMessageEntry(message) {
   return {
     id: message.id,
@@ -232,7 +234,7 @@ app.post('/api/auth/login', async (req, res) => {
   }
 
   user.status = 'online';
-  saveState();
+  saveRow('users', user);
 
   const token = createToken(user);
   return res.json({ token, user: sanitizeUser(user) });
@@ -246,7 +248,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
     const resetToken = randomBytes(32).toString('hex');
     user.resetTokenHash = createHash('sha256').update(resetToken).digest('hex');
     user.resetTokenExpiresAt = Date.now() + 15 * 60 * 1000;
-    saveState();
+    saveRow('users', user);
     if (process.env.NODE_ENV !== 'production') response.resetToken = resetToken;
   }
   return res.json(response);
@@ -263,7 +265,7 @@ app.post('/api/auth/reset-password', async (req, res) => {
   user.password = await bcrypt.hash(password, 10);
   delete user.resetTokenHash;
   delete user.resetTokenExpiresAt;
-  saveState();
+  saveRow('users', user);
   return res.json({ message: 'Password reset successfully. You can now sign in.' });
 });
 
@@ -290,7 +292,7 @@ app.post('/api/users/me/password', authMiddleware, async (req, res) => {
   user.password = await bcrypt.hash(newPassword, 10);
   delete user.resetTokenHash;
   delete user.resetTokenExpiresAt;
-  saveState();
+  saveRow('users', user);
   return res.json({ message: 'Password changed.' });
 });
 
@@ -331,7 +333,7 @@ app.post('/api/users/staff', authMiddleware, requireManager, async (req, res) =>
     createdAt: new Date().toISOString()
   };
   state.users.push(staffUser);
-  saveState();
+  saveRow('users', staffUser);
   return res.status(201).json({ user: sanitizeUser(staffUser) });
 });
 
@@ -340,7 +342,7 @@ app.patch('/api/users/:id/status', authMiddleware, requireManager, (req, res) =>
   if (!user) return res.status(404).json({ message: 'User not found.' });
   if (user.id === req.currentUser.id) return res.status(400).json({ message: 'You cannot deactivate your own account.' });
   user.active = Boolean(req.body?.active);
-  saveState();
+  saveRow('users', user);
   return res.json({ user: sanitizeUser(user) });
 });
 
@@ -350,7 +352,7 @@ app.post('/api/users/:id/reset-password', authMiddleware, requireManager, async 
   const resetToken = randomBytes(32).toString('hex');
   user.resetTokenHash = createHash('sha256').update(resetToken).digest('hex');
   user.resetTokenExpiresAt = Date.now() + 15 * 60 * 1000;
-  saveState();
+  saveRow('users', user);
   const response = { message: 'A password reset link has been created.' };
   if (process.env.NODE_ENV !== 'production') response.resetToken = resetToken;
   return res.json(response);
@@ -363,11 +365,22 @@ app.get('/api/reports', authMiddleware, (req, res) => {
     .filter((report) => ['manager', 'assistant_manager'].includes(viewer?.role) || report.submittedBy === req.user.id)
     .map((report) => ({
       ...report,
+      data: withoutPhotos(report.data),
       submitter: sanitizeUser(state.users.find((user) => user.id === report.submittedBy) || {}),
       ...reportSummary(report)
     }))
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   return res.json({ reports });
+});
+
+// Full report including photos; the list endpoint above leaves photos out to keep it small.
+app.get('/api/reports/:id', authMiddleware, (req, res) => {
+  const viewer = currentUser(req);
+  const report = state.reports.find((entry) => entry.id === req.params.id && !entry.voided);
+  if (!report || (!['manager', 'assistant_manager'].includes(viewer?.role) && report.submittedBy !== req.user.id)) {
+    return res.status(404).json({ message: 'Report not found.' });
+  }
+  return res.json({ report: { ...report, submitter: sanitizeUser(state.users.find((user) => user.id === report.submittedBy) || {}), ...reportSummary(report) } });
 });
 
 app.post('/api/reports', authMiddleware, (req, res) => {
@@ -382,8 +395,8 @@ app.post('/api/reports', authMiddleware, (req, res) => {
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), hodSignature: null
   };
   state.reports.push(report);
-  saveState();
-  return res.status(201).json({ report: { ...report, ...reportSummary(report) } });
+  saveRow('reports', report);
+  return res.status(201).json({ report: { ...report, data: withoutPhotos(report.data), ...reportSummary(report) } });
 });
 
 app.post('/api/reports/:id/sign', authMiddleware, requireManager, (req, res) => {
@@ -392,8 +405,8 @@ app.post('/api/reports/:id/sign', authMiddleware, requireManager, (req, res) => 
   report.hodSignature = req.currentUser.name;
   report.hodSignedAt = new Date().toISOString();
   report.updatedAt = new Date().toISOString();
-  saveState();
-  return res.json({ report });
+  saveRow('reports', report);
+  return res.json({ report: { ...report, data: withoutPhotos(report.data) } });
 });
 
 app.get('/api/tasks', authMiddleware, (req, res) => {
@@ -406,7 +419,7 @@ app.post('/api/tasks', authMiddleware, requireManager, (req, res) => {
   if (!title || !location) return res.status(400).json({ message: 'Task title and location are required.' });
   const task = { id: randomUUID(), title, location, assignedTo: assignedTo || null, assignedBy: req.user.id, priority, dueDate: dueDate || null, status: 'pending', createdAt: new Date().toISOString() };
   state.tasks.push(task);
-  saveState();
+  saveRow('tasks', task);
   return res.status(201).json({ task });
 });
 
@@ -424,7 +437,7 @@ app.patch('/api/tasks/:id/status', authMiddleware, (req, res) => {
   task.status = status;
   task.updatedAt = new Date().toISOString();
   task.completedAt = status === 'completed' ? task.updatedAt : null;
-  saveState();
+  saveRow('tasks', task);
   return res.json({ task });
 });
 
@@ -463,7 +476,7 @@ app.post('/api/messages', authMiddleware, (req, res) => {
   };
 
   state.messages.push(message);
-  saveState();
+  saveRow('messages', message);
 
   const payload = buildMessageEntry(message);
   io.to(receiverId).emit('new-message', payload);
@@ -496,7 +509,7 @@ io.on('connection', (socket) => {
     const user = state.users.find((entry) => entry.id === userId);
     if (user) {
       user.status = 'online';
-      saveState();
+      saveRow('users', user);
     }
 
     io.emit('presence:update', { userId, isOnline: true });
@@ -509,7 +522,7 @@ io.on('connection', (socket) => {
       const user = state.users.find((entry) => entry.id === userId);
       if (user) {
         user.status = 'offline';
-        saveState();
+        saveRow('users', user);
       }
       io.emit('presence:update', { userId, isOnline: false });
     }
@@ -518,6 +531,14 @@ io.on('connection', (socket) => {
 
 app.use((req, res) => {
   res.status(404).json({ message: 'Not found.' });
+});
+
+// Body-parser errors (oversized uploads, malformed JSON) otherwise come back as HTML pages.
+app.use((error, req, res, next) => {
+  if (error.type === 'entity.too.large') return res.status(413).json({ message: 'Upload is too large. Try fewer or smaller photos.' });
+  if (error.type === 'entity.parse.failed') return res.status(400).json({ message: 'Invalid request body.' });
+  console.error(error);
+  return res.status(500).json({ message: 'Something went wrong on the server.' });
 });
 
 export default server;
