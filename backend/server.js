@@ -42,6 +42,8 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json({ limit: '10mb' }));
+// Railway and Render sit one proxy in front of the app; without this every request's IP is the proxy's.
+app.set('trust proxy', 1);
 
 const DEFAULT_STATE = { users: [], messages: [], reports: [], tasks: [] };
 if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
@@ -214,7 +216,41 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true, message: 'HK SYNC backend is running.' });
 });
 
+// Brute-force protection: count failed sign-ins per account and per client IP in a fixed window.
+// The IP limit is generous because staff on the hotel Wi-Fi share one public address.
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_LIMITS = { account: 5, ip: 50 };
+const loginFailures = new Map();
+
+function failuresFor(key) {
+  const entry = loginFailures.get(key);
+  if (!entry || entry.resetAt <= Date.now()) {
+    loginFailures.delete(key);
+    return null;
+  }
+  return entry;
+}
+
+function recordLoginFailure(key) {
+  const entry = failuresFor(key);
+  if (entry) entry.count += 1;
+  else loginFailures.set(key, { count: 1, resetAt: Date.now() + LOGIN_WINDOW_MS });
+}
+
+setInterval(() => loginFailures.forEach((entry, key) => failuresFor(key)), LOGIN_WINDOW_MS).unref();
+
 app.post('/api/auth/login', async (req, res) => {
+  const accountKey = `account:${String(req.body?.email || '').trim().toLowerCase()}`;
+  const ipKey = `ip:${req.ip}`;
+  const blocked = [[accountKey, LOGIN_LIMITS.account], [ipKey, LOGIN_LIMITS.ip]]
+    .map(([key, limit]) => failuresFor(key)?.count >= limit ? failuresFor(key) : null)
+    .find(Boolean);
+  if (blocked) {
+    const minutes = Math.ceil((blocked.resetAt - Date.now()) / 60000);
+    res.set('Retry-After', String(Math.ceil((blocked.resetAt - Date.now()) / 1000)));
+    return res.status(429).json({ message: `Too many failed sign-in attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.` });
+  }
+
   const { email, password } = req.body || {};
 
   if (!email || !password) {
@@ -222,16 +258,14 @@ app.post('/api/auth/login', async (req, res) => {
   }
 
   const user = state.users.find((entry) => entry.email.toLowerCase() === String(email).toLowerCase());
-  if (!user) {
+  if (!user || !(await bcrypt.compare(String(password), user.password))) {
+    recordLoginFailure(accountKey);
+    recordLoginFailure(ipKey);
     return res.status(401).json({ message: 'Invalid email or password.' });
   }
+  loginFailures.delete(accountKey);
   if (user.active === false) {
     return res.status(403).json({ message: 'This account is inactive. Contact a manager.' });
-  }
-
-  const isValidPassword = await bcrypt.compare(password, user.password);
-  if (!isValidPassword) {
-    return res.status(401).json({ message: 'Invalid email or password.' });
   }
 
   user.status = 'online';
@@ -313,11 +347,23 @@ app.get('/api/users/all', authMiddleware, (req, res) => {
   return res.json({ users: state.users.map(sanitizeUser) });
 });
 
+// Managers can manage everyone else; assistant managers only field staff, so they can't lock out the manager or each other.
+const FIELD_STAFF_ROLES = ['supervisor', 'driver', 'storekeeper'];
+function canManageRole(actor, role) {
+  return actor.role === 'manager' ? role !== 'manager' : FIELD_STAFF_ROLES.includes(role);
+}
+
 app.post('/api/users/staff', authMiddleware, requireManager, async (req, res) => {
   const { name, email, password, role } = req.body || {};
-  const allowedRoles = ['supervisor', 'driver', 'storekeeper', 'assistant_manager'];
+  const allowedRoles = [...FIELD_STAFF_ROLES, 'assistant_manager'];
   if (!name || !email || !password || !allowedRoles.includes(role)) {
     return res.status(400).json({ message: 'Name, email, password, and a valid staff role are required.' });
+  }
+  if (typeof password !== 'string' || password.length < 8) {
+    return res.status(400).json({ message: 'The temporary password must be at least 8 characters.' });
+  }
+  if (!canManageRole(req.currentUser, role)) {
+    return res.status(403).json({ message: 'Only the manager can create assistant manager accounts.' });
   }
   if (state.users.some((user) => user.email.toLowerCase() === String(email).toLowerCase())) {
     return res.status(409).json({ message: 'A user with that email already exists.' });
@@ -342,6 +388,7 @@ app.patch('/api/users/:id/status', authMiddleware, requireManager, (req, res) =>
   const user = state.users.find((entry) => entry.id === req.params.id);
   if (!user) return res.status(404).json({ message: 'User not found.' });
   if (user.id === req.currentUser.id) return res.status(400).json({ message: 'You cannot deactivate your own account.' });
+  if (!canManageRole(req.currentUser, user.role)) return res.status(403).json({ message: 'You cannot change this account.' });
   user.active = Boolean(req.body?.active);
   saveRow('users', user);
   return res.json({ user: sanitizeUser(user) });
@@ -350,6 +397,7 @@ app.patch('/api/users/:id/status', authMiddleware, requireManager, (req, res) =>
 app.post('/api/users/:id/reset-password', authMiddleware, requireManager, async (req, res) => {
   const user = state.users.find((entry) => entry.id === req.params.id);
   if (!user) return res.status(404).json({ message: 'User not found.' });
+  if (!canManageRole(req.currentUser, user.role)) return res.status(403).json({ message: "You cannot reset this account's password." });
   const resetToken = randomBytes(32).toString('hex');
   user.resetTokenHash = createHash('sha256').update(resetToken).digest('hex');
   user.resetTokenExpiresAt = Date.now() + 15 * 60 * 1000;
