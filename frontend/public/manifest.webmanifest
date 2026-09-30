@@ -1,7 +1,7 @@
 {
   "name": "HK SYNC - Housekeeping Operations",
   "short_name": "HK SYNC",
-  "description": "Housekeeping, perfectly sychronised",
+  "description": "Housekeeping, perfectly synchronised",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

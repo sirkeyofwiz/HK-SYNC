@@ -147,15 +147,16 @@ function currentUser(req) {
 
 function scoreValues(entry) {
   if (!entry || !entry.scores) return [];
-  return Object.values(entry.scores).map(Number).filter((score) => Number.isFinite(score));
+  // Blank fields are "not scored", not zero.
+  return Object.values(entry.scores).filter((score) => score !== '' && score !== null).map(Number).filter((score) => Number.isFinite(score));
 }
 
 function reportSummary(report) {
-  const entries = [
-    ...(Array.isArray(report.data?.entries) ? report.data.entries : []),
-    ...(Array.isArray(report.data?.trolleys) ? report.data.trolleys : []),
-    ...(Array.isArray(report.data?.pantries) ? report.data.pantries : [])
-  ];
+  const list = (key) => (Array.isArray(report.data?.[key]) ? report.data[key] : []);
+  // Older reports carry a placeholder `entries` item on every type, so only count the lists that belong to the report type.
+  const entries = report.type === 'trolley_pantry'
+    ? [...list('trolleys'), ...list('pantries')]
+    : ['vehicle', 'handover'].includes(report.type) ? [] : list('entries');
   const scores = entries.flatMap(scoreValues);
   const hasBadVehicle = Object.values(report.data?.vehicle || {}).includes('Not OK');
   const flaggedEntries = entries.filter((entry) => {

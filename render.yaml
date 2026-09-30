@@ -14,7 +14,7 @@ services:
         sync: false
     disk:
       name: bahari-operations-data
-      mountPath: /opt/render/project/src/data
+      mountPath: /opt/render/project/src/backend/data
       sizeGB: 1
 
   - type: web

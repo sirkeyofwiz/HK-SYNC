@@ -61,7 +61,7 @@ The development login is prefilled with:
 - Email: `manager@bahari.local`
 - Password: `password123`
 
-Change demo credentials before using the application in a real environment.
+These credentials are only seeded outside production. In production (`NODE_ENV=production`), a new database's manager password comes from `SEED_MANAGER_PASSWORD`, or is generated randomly and printed once in the server log. Change it from the **Account** page after first sign-in.
 
 ## Production configuration
 
@@ -70,10 +70,11 @@ The backend uses these environment variables:
 - `JWT_SECRET` - long random secret used to sign authentication tokens
 - `CLIENT_URL` - comma-separated frontend origin(s), without trailing slashes
 - `NODE_ENV=production` - enables production behavior
+- `SEED_MANAGER_PASSWORD` - optional; initial manager password when the database is empty
 
 The frontend uses:
 
-- `VITE_API_URL` - public API origin, without the `/api` suffix
+- `VITE_API_URL` - public API origin, without the `/api` suffix (development only; production builds currently use the Railway API URL in `frontend/src/App.jsx`)
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for the Render setup and SQLite persistent-disk requirements.
 
