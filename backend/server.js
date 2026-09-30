@@ -88,19 +88,23 @@ function saveState() {
 }
 
 if (!state.users || state.users.length === 0) {
+  // Never seed a publicly known password in production: use SEED_MANAGER_PASSWORD, or generate one and print it once.
+  const seedPassword = process.env.SEED_MANAGER_PASSWORD || (process.env.NODE_ENV === 'production' ? randomBytes(12).toString('base64url') : 'password123');
   state.users = [{
     id: randomUUID(),
     name: 'Manager',
     email: 'manager@bahari.local',
     avatar: 'https://ui-avatars.com/api/?name=Manager&background=2563eb&color=fff',
     role: 'manager',
-    password: await bcrypt.hash('password123', 10),
+    password: await bcrypt.hash(seedPassword, 10),
     active: true,
     status: 'offline',
     createdAt: new Date().toISOString(),
   }];
   saveState();
-  console.log('Seeded default manager: manager@bahari.local / password123');
+  console.log(process.env.SEED_MANAGER_PASSWORD
+    ? 'Seeded default manager: manager@bahari.local (password from SEED_MANAGER_PASSWORD)'
+    : `Seeded default manager: manager@bahari.local / ${seedPassword}`);
 }
 
 const server = app.listen(process.env.PORT || 5000, () => {
@@ -192,6 +196,10 @@ function authMiddleware(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
+    const user = state.users.find((entry) => entry.id === decoded.id);
+    if (!user || user.active === false) {
+      return res.status(401).json({ message: 'This account is no longer active.' });
+    }
     req.user = decoded;
     next();
   } catch (error) {
@@ -201,38 +209,6 @@ function authMiddleware(req, res, next) {
 
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, message: 'HK SYNC backend is running.' });
-});
-
-app.post('/api/auth/register', async (req, res) => {
-  const { name, email, password, avatar, role } = req.body || {};
-
-  if (!name || !email || !password) {
-    return res.status(400).json({ message: 'Name, email, and password are required.' });
-  }
-
-  const existingUser = state.users.find((user) => user.email.toLowerCase() === String(email).toLowerCase());
-  if (existingUser) {
-    return res.status(409).json({ message: 'A user with that email already exists.' });
-  }
-
-  const hashedPassword = await bcrypt.hash(password, 10);
-  const newUser = {
-    id: crypto.randomUUID(),
-    name: name.trim(),
-    email: email.trim().toLowerCase(),
-    avatar: avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(name.trim())}&background=2563eb&color=fff`,
-    role: role || 'supervisor',
-    password: hashedPassword,
-    active: true,
-    status: 'online',
-    createdAt: new Date().toISOString()
-  };
-
-  state.users.push(newUser);
-  saveState();
-
-  const token = createToken(newUser);
-  return res.status(201).json({ token, user: sanitizeUser(newUser) });
 });
 
 app.post('/api/auth/login', async (req, res) => {
@@ -327,7 +303,7 @@ app.post('/api/users/staff', authMiddleware, requireManager, async (req, res) =>
     return res.status(409).json({ message: 'A user with that email already exists.' });
   }
   const staffUser = {
-    id: crypto.randomUUID(),
+    id: randomUUID(),
     name: name.trim(),
     email: email.trim().toLowerCase(),
     role,
@@ -385,7 +361,7 @@ app.post('/api/reports', authMiddleware, (req, res) => {
     return res.status(403).json({ message: 'Your role cannot submit this report type.' });
   }
   const report = {
-    id: crypto.randomUUID(), type, date, data, submittedBy: req.user.id,
+    id: randomUUID(), type, date, data, submittedBy: req.user.id,
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), hodSignature: null
   };
   state.reports.push(report);
@@ -411,7 +387,7 @@ app.get('/api/tasks', authMiddleware, (req, res) => {
 app.post('/api/tasks', authMiddleware, requireManager, (req, res) => {
   const { title, location, assignedTo, priority = 'medium', dueDate } = req.body || {};
   if (!title || !location) return res.status(400).json({ message: 'Task title and location are required.' });
-  const task = { id: crypto.randomUUID(), title, location, assignedTo: assignedTo || null, assignedBy: req.user.id, priority, dueDate: dueDate || null, status: 'pending', createdAt: new Date().toISOString() };
+  const task = { id: randomUUID(), title, location, assignedTo: assignedTo || null, assignedBy: req.user.id, priority, dueDate: dueDate || null, status: 'pending', createdAt: new Date().toISOString() };
   state.tasks.push(task);
   saveState();
   return res.status(201).json({ task });
@@ -443,7 +419,7 @@ app.post('/api/messages', authMiddleware, (req, res) => {
   }
 
   const message = {
-    id: crypto.randomUUID(),
+    id: randomUUID(),
     senderId: req.user.id,
     receiverId,
     text: String(text).trim(),
@@ -461,9 +437,22 @@ app.post('/api/messages', authMiddleware, (req, res) => {
   return res.status(201).json({ message: payload });
 });
 
+// Sockets must present a valid JWT (socket.io-client: `io(url, { auth: { token } })`); the user id always comes from the token, never from the client.
+io.use((socket, next) => {
+  try {
+    const decoded = jwt.verify(socket.handshake.auth?.token || '', JWT_SECRET);
+    const user = state.users.find((entry) => entry.id === decoded.id);
+    if (!user || user.active === false) return next(new Error('Unauthorized'));
+    socket.authUserId = user.id;
+    next();
+  } catch (error) {
+    next(new Error('Unauthorized'));
+  }
+});
+
 io.on('connection', (socket) => {
-  socket.on('register-user', (userId) => {
-    if (!userId) return;
+  socket.on('register-user', () => {
+    const userId = socket.authUserId;
 
     onlineUsers.set(userId, socket.id);
     socket.join(userId);

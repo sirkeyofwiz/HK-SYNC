@@ -16,3 +16,5 @@ backend/data/*.sqlite
 backend/data/*.sqlite-shm
 backend/data/*.sqlite-wal
 backend/data/db.json
+
+node_modules/
