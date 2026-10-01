@@ -31,6 +31,7 @@ database.exec(`
   CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, data TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS reports (id TEXT PRIMARY KEY, data TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS goals (id TEXT PRIMARY KEY, data TEXT NOT NULL);
 `);
 const app = express();
 const allowedOrigins = [...new Set([
@@ -45,7 +46,7 @@ app.use(express.json({ limit: '10mb' }));
 // Railway and Render sit one proxy in front of the app; without this every request's IP is the proxy's.
 app.set('trust proxy', 1);
 
-const DEFAULT_STATE = { users: [], messages: [], reports: [], tasks: [] };
+const DEFAULT_STATE = { users: [], messages: [], reports: [], tasks: [], goals: [] };
 if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
   throw new Error('JWT_SECRET must be configured in production.');
 }
@@ -55,17 +56,17 @@ const roleReportTypes = {
   supervisor: ['neglected', 'quality', 'trolley_pantry', 'handover'],
   storekeeper: ['tools'],
   driver: ['vehicle'],
-  manager: ['neglected', 'quality', 'trolley_pantry', 'handover', 'vehicle', 'tools'],
-  assistant_manager: ['neglected', 'quality', 'trolley_pantry', 'handover', 'vehicle', 'tools']
+  manager: ['neglected', 'quality', 'trolley_pantry', 'handover', 'vehicle', 'tools', 'inspection_rate'],
+  assistant_manager: ['neglected', 'quality', 'trolley_pantry', 'handover', 'vehicle', 'tools', 'inspection_rate']
 };
 
 function readState() {
-  const tableCounts = ['users', 'messages', 'reports', 'tasks'].map((table) => database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count);
+  const tableCounts = ['users', 'messages', 'reports', 'tasks', 'goals'].map((table) => database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count);
   if (tableCounts.every((count) => count === 0) && fs.existsSync(dataFilePath)) {
     const legacyState = JSON.parse(fs.readFileSync(dataFilePath, 'utf8'));
     const importState = database.transaction(() => {
       for (const [table, rows] of Object.entries(legacyState)) {
-        if (!['users', 'messages', 'reports', 'tasks'].includes(table) || !Array.isArray(rows)) continue;
+        if (!['users', 'messages', 'reports', 'tasks', 'goals'].includes(table) || !Array.isArray(rows)) continue;
         const insert = database.prepare(`INSERT OR REPLACE INTO ${table} (id, data) VALUES (?, ?)`);
         rows.forEach((row) => insert.run(row.id, JSON.stringify(row)));
       }
@@ -73,12 +74,12 @@ function readState() {
     importState();
   }
   const load = (table) => database.prepare(`SELECT data FROM ${table}`).all().map((row) => JSON.parse(row.data));
-  return { users: load('users'), messages: load('messages'), reports: load('reports'), tasks: load('tasks') };
+  return { users: load('users'), messages: load('messages'), reports: load('reports'), tasks: load('tasks'), goals: load('goals') };
 }
 
 let state = readState();
 
-const upsertStatements = Object.fromEntries(['users', 'messages', 'reports', 'tasks'].map((table) => [table, database.prepare(`INSERT OR REPLACE INTO ${table} (id, data) VALUES (?, ?)`)]));
+const upsertStatements = Object.fromEntries(['users', 'messages', 'reports', 'tasks', 'goals'].map((table) => [table, database.prepare(`INSERT OR REPLACE INTO ${table} (id, data) VALUES (?, ?)`)]));
 
 // Persist only the row that changed; rewriting whole tables on every update gets slow as reports and photos accumulate.
 function saveRow(table, row) {
@@ -104,6 +105,110 @@ if (!state.users || state.users.length === 0) {
     ? 'Seeded default manager: manager@bahari.local (password from SEED_MANAGER_PASSWORD)'
     : `Seeded default manager: manager@bahari.local / ${seedPassword}`);
 }
+
+// HK Goals Tracker, seeded from the department's tracker workbook. Managers edit it on the Goals page.
+if (!state.goals.length) {
+  const goals = {
+    id: 'current',
+    year: 2026,
+    smartGoals: [
+      { key: 'cleaning_level', label: 'Cleaning Level', target: 98, rate: 144 },
+      { key: 'hygiene_standard', label: 'Hygiene Standard', target: 0, rate: 26 },
+      { key: 'organization_supplies', label: 'Organization Supplies', target: 0, rate: 20 },
+      { key: 'guest_interaction', label: 'Enhance Guest Interaction', target: 0, rate: 40 }
+    ],
+    // HK scores are 1-10 per area; 0 or missing = not yet rated.
+    hkProgress: [
+      { name: 'Agness Ramadan' }, { name: 'Abdallah Hassan' }, { name: 'Amina Abdalla' }, { name: 'Amina Said' },
+      { name: 'Feisal Abdalla' }, { name: 'Chrisitna Andrea' }, { name: 'Clementina Mwapopo' }, { name: 'Diana Ndanshau' },
+      { name: 'Dora Godson', cleaning: 10 }, { name: 'Elizabeth Antony' }, { name: 'Elizabeth Petro' }, { name: 'Sara Mbise' },
+      { name: 'Khairat Juma', cleaning: 8 }, { name: 'Hajrat Michael' }, { name: 'Hapsa Omar' }, { name: 'Hilda Daniel' },
+      { name: 'Madua Hassan' }, { name: 'Mariam Khalifan' }, { name: 'Matilder Richard' }, { name: 'Anifa' },
+      { name: 'Mulfida' }, { name: 'Mwajuma Seif' }, { name: 'Mwanaide Ally' }, { name: 'Nachia Abdallah' },
+      { name: 'Nahla Mohammed' }, { name: 'Najma Khamis' }, { name: 'Pili Omar' }, { name: 'khadija' },
+      { name: 'Salome Festo' }, { name: 'Shamimu Hassan' }, { name: 'Sharifa Sharif', cleaning: 9 }, { name: 'Sophia Amos' },
+      { name: 'Teresia Kassim' }, { name: 'Nehema' }, { name: 'Yasinta Alfred', cleaning: 8 }, { name: 'Zawadi' },
+      { name: 'Dorice Edward' }, { name: 'Maryam Mohammed' }, { name: 'Zuwena Ally' }, { name: 'Christina' }
+    ],
+    // Public Area numbers are tally counts, not 1-10 scores.
+    paProgress: [
+      { name: 'Abdallah Mberwa', cleaning: 34, hygiene: 7, farewellLounge: 7 },
+      { name: 'Abubakar Jaala', cleaning: 33, hygiene: 16, guestInteraction: 11 },
+      { name: 'Amir Seif', cleaning: 21, hygiene: 12, farewellLounge: 15, weakness: 'FL drainage, shelf. Library shelf, soap dispenser, hair dryer' },
+      { name: 'Adil', cleaning: 18 },
+      { name: 'Hussein Hatibu', cleaning: 22, guestInteraction: 8, weakness: 'soap dispense, wall tiles, door handle' },
+      { name: 'Innocent', cleaning: 27, guestInteraction: 7 },
+      { name: 'Isaya Peter', cleaning: 29 },
+      { name: 'Nurudinin Yussuf', cleaning: 23, hygiene: 6, farewellLounge: 7, weakness: 'FL drainage, shelf.' },
+      { name: 'Suleiman Amer', cleaning: 16, guestInteraction: 3, weakness: 'needs to study english' },
+      { name: 'Twa Hamid', cleaning: 18, hygiene: 9, guestInteraction: 4, weakness: 'english need practice' },
+      { name: 'Yahya Juma', cleaning: 32, hygiene: 6, farewellLounge: 8, weakness: 'shelf, door handle' },
+      { name: 'Yussuf Amour', cleaning: 8, hygiene: 9 }
+    ]
+  };
+  state.goals.push(goals);
+  saveRow('goals', goals);
+}
+
+const POINTS_TARGETS = { supervisor: 500, hk: 150, deadline: '2027-09-30' };
+const HK_POINT_TYPES = ['quality', 'neglected', 'trolley_pantry'];
+const sum = (values) => values.reduce((total, value) => total + value, 0);
+const nameKey = (name) => String(name || '').trim().toLowerCase();
+
+// Supervisor points: every room total (out of 50) from Inspection Rate Program reports about them, plus a cumulative history.
+function supervisorPoints() {
+  const reports = state.reports.filter((report) => report.type === 'inspection_rate' && !report.voided)
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  return state.users.filter((user) => user.role === 'supervisor' && user.active !== false).map((supervisor) => {
+    let points = 0;
+    const history = [];
+    for (const report of reports.filter((entry) => entry.data?.supervisorId === supervisor.id)) {
+      points += sum(scoredEntries(report).map((entry) => sum(scoreValues(entry))));
+      history.push({ date: report.date, points });
+    }
+    return { id: supervisor.id, name: supervisor.name, points, sessions: history.length, history };
+  });
+}
+
+// HK points: each inspected room adds its average score (max 10), whichever report type it came from,
+// so a 17-box Quality Checklist room counts the same as a 3-box Neglected Area room.
+function hkPoints(roster) {
+  const totals = new Map();
+  for (const report of state.reports) {
+    if (report.voided || !HK_POINT_TYPES.includes(report.type)) continue;
+    for (const entry of scoredEntries(report)) {
+      const values = scoreValues(entry);
+      if (!entry.hkName || !values.length) continue;
+      const key = nameKey(entry.hkName);
+      const current = totals.get(key) || { name: String(entry.hkName).trim(), points: 0, rooms: 0 };
+      current.points += sum(values) / values.length;
+      current.rooms += 1;
+      totals.set(key, current);
+    }
+  }
+  const rows = roster.map((person) => {
+    const found = totals.get(nameKey(person.name));
+    totals.delete(nameKey(person.name));
+    return { name: person.name, points: Number((found?.points || 0).toFixed(1)), rooms: found?.rooms || 0, onRoster: true };
+  });
+  // Names typed in reports that don't match the roster (often typos) are listed separately, not counted in the pass rate.
+  const unmatched = [...totals.values()].map((entry) => ({ ...entry, points: Number(entry.points.toFixed(1)), onRoster: false }));
+  return [...rows, ...unmatched];
+}
+
+function goalsResponse() {
+  const goals = state.goals.find((entry) => entry.id === 'current');
+  return { ...goals, targets: POINTS_TARGETS, supervisorPoints: supervisorPoints(), hkPoints: hkPoints(goals.hkProgress) };
+}
+
+const clampScore = (value) => Math.min(10, Math.max(0, Math.round(Number(value) || 0)));
+const tally = (value) => Math.max(0, Math.round(Number(value) || 0));
+const cleanName = (value) => String(value || '').trim().slice(0, 80);
+const GOALS_SHAPE = {
+  smartGoals: (rows) => rows.filter((row) => row && row.key).map((row) => ({ key: String(row.key).slice(0, 60), label: cleanName(row.label) || String(row.key), target: tally(row.target), rate: tally(row.rate) })),
+  hkProgress: (rows) => rows.filter((row) => cleanName(row?.name)).map((row) => ({ name: cleanName(row.name), ...Object.fromEntries(['cleaning', 'hygiene', 'guestInteraction', 'cleaningTime', 'trolleyPantry'].map((key) => [key, clampScore(row[key])])) })),
+  paProgress: (rows) => rows.filter((row) => cleanName(row?.name)).map((row) => ({ name: cleanName(row.name), ...Object.fromEntries(['cleaning', 'hygiene', 'guestInteraction', 'farewellLounge'].map((key) => [key, tally(row[key])])), weakness: String(row.weakness || '').slice(0, 300) }))
+};
 
 const server = app.listen(process.env.PORT || 5000, () => {
   console.log(`HK SYNC backend running on port ${process.env.PORT || 5000}`);
@@ -153,18 +258,25 @@ function scoreValues(entry) {
   return Object.values(entry.scores).filter((score) => score !== '' && score !== null).map(Number).filter((score) => Number.isFinite(score));
 }
 
-function reportSummary(report) {
+// Inspection Rate Program rooms under 40/50 (average below 8) must be re-cleaned before check-in.
+const FLAG_THRESHOLDS = { inspection_rate: 8 };
+
+// Older reports carry a placeholder `entries` item on every type, so only read the lists that belong to the report type.
+function scoredEntries(report) {
   const list = (key) => (Array.isArray(report.data?.[key]) ? report.data[key] : []);
-  // Older reports carry a placeholder `entries` item on every type, so only count the lists that belong to the report type.
-  const entries = report.type === 'trolley_pantry'
-    ? [...list('trolleys'), ...list('pantries')]
-    : ['vehicle', 'handover'].includes(report.type) ? [] : list('entries');
+  if (report.type === 'trolley_pantry') return [...list('trolleys'), ...list('pantries')];
+  return ['vehicle', 'handover'].includes(report.type) ? [] : list('entries');
+}
+
+function reportSummary(report) {
+  const entries = scoredEntries(report);
+  const threshold = FLAG_THRESHOLDS[report.type] ?? 6;
   const scores = entries.flatMap(scoreValues);
   const hasBadVehicle = Object.values(report.data?.vehicle || {}).includes('Not OK');
   const flaggedEntries = entries.filter((entry) => {
     const values = scoreValues(entry);
     const average = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 10;
-    return average < 6 || entry.status === 'Broken' || Boolean(entry.remarks);
+    return average < threshold || entry.status === 'Broken' || Boolean(entry.remarks);
   });
   return {
     itemCount: entries.length || (report.data?.items ? report.data.items.length : 0),
@@ -505,6 +617,11 @@ app.post('/api/reports', authMiddleware, (req, res) => {
   if (!roleReportTypes[submitter?.role]?.includes(type)) {
     return res.status(403).json({ message: 'Your role cannot submit this report type.' });
   }
+  if (type === 'inspection_rate') {
+    const evaluated = state.users.find((user) => user.id === data.supervisorId && user.role === 'supervisor' && user.active !== false);
+    if (!evaluated) return res.status(400).json({ message: 'Choose the supervisor being evaluated.' });
+    data.supervisorName = evaluated.name;
+  }
   const report = {
     id: randomUUID(), type, date, data, submittedBy: req.user.id,
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), hodSignature: null
@@ -512,6 +629,24 @@ app.post('/api/reports', authMiddleware, (req, res) => {
   state.reports.push(report);
   saveRow('reports', report);
   return res.status(201).json({ report: { ...report, data: withoutPhotos(report.data), ...reportSummary(report) } });
+});
+
+app.get('/api/goals', authMiddleware, requireManager, (req, res) => {
+  return res.json({ goals: goalsResponse() });
+});
+
+// Replaces only the manager-entered sections that are posted; points are always computed, never stored.
+app.put('/api/goals', authMiddleware, requireManager, (req, res) => {
+  const goals = state.goals.find((entry) => entry.id === 'current');
+  for (const [section, clean] of Object.entries(GOALS_SHAPE)) {
+    if (req.body?.[section] === undefined) continue;
+    if (!Array.isArray(req.body[section])) return res.status(400).json({ message: `${section} must be a list.` });
+    goals[section] = clean(req.body[section]);
+  }
+  goals.updatedAt = new Date().toISOString();
+  goals.updatedBy = req.currentUser.name;
+  saveRow('goals', goals);
+  return res.json({ goals: goalsResponse() });
 });
 
 app.post('/api/reports/:id/sign', authMiddleware, requireManager, (req, res) => {
