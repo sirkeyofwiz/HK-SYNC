@@ -55,6 +55,7 @@ header h1 { font-size: 28px; letter-spacing: -1.2px; margin: 4px 0 0; }
 header .kicker { font-size: 18px; color: var(--accent); }
 .muted { color: var(--slate); font-size: 13px; }
 .error { color: var(--red); font-size: 12px; }
+.success { color: var(--green); font-size: 12px; overflow-wrap: anywhere; }
 .red-text { color: var(--red); }
 .green-text { color: var(--green); }
 
@@ -69,7 +70,7 @@ header .kicker { font-size: 18px; color: var(--accent); }
 .panel-title { display: flex; justify-content: space-between; align-items: start; margin-bottom: 18px; }
 .panel h3 { margin: 6px 0 0; font-size: 18px; }
 
-.notice { background: #dcefe2; color: #276343; padding: 12px 16px; border-radius: 6px; margin-bottom: 18px; font-size: 13px; }
+.notice { overflow-wrap: anywhere; background: #dcefe2; color: #276343; padding: 12px 16px; border-radius: 6px; margin-bottom: 18px; font-size: 13px; }
 .notice button { float: right; background: none; color: inherit; font-size: 18px; }
 .empty { text-align: center; color: var(--slate); padding: 42px 20px; font-size: 13px; }
 
@@ -153,6 +154,39 @@ header .kicker { font-size: 18px; color: var(--accent); }
 .account-form label { display: flex; flex-direction: column; gap: 7px; font-size: 11px; font-weight: 700; color: var(--slate); }
 .account-form .primary { align-self: start; }
 
+/* ---------- Messages ---------- */
+.rail nav button { position: relative; }
+.nav-badge { position: absolute; top: 2px; right: calc(50% - 24px); min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--red); color: #fff; font: normal 700 10px/18px Manrope, sans-serif; }
+.chat { display: grid; grid-template-columns: 300px 1fr; gap: 20px; height: calc(100vh - 198px); min-height: 460px; }
+.chat-people { display: flex; flex-direction: column; gap: 4px; padding: 16px; overflow-y: auto; }
+.chat-people > .kicker { margin: 4px 10px 8px; }
+.chat-person { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px; border-radius: 7px; background: transparent; text-align: left; }
+.chat-person:hover, .chat-person.active { background: #f2f6fb; }
+.chat-person .avatar { position: relative; flex: 0 0 38px; }
+.online-dot { position: absolute; right: -1px; bottom: -1px; width: 11px; height: 11px; border-radius: 50%; background: #51a876; border: 2px solid #fff; }
+.chat-person-text { flex: 1; min-width: 0; }
+.chat-person-text strong, .chat-person-text small { display: block; }
+.chat-person-text strong { font-size: 13px; }
+.chat-person-text small { margin-top: 3px; color: var(--slate); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-person-text small.role { text-transform: capitalize; }
+.unread { min-width: 20px; padding: 3px 7px; border-radius: 20px; background: var(--accent); color: #fff; font-size: 10px; text-align: center; }
+.chat-thread { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.chat-thread > .empty { margin: auto; }
+.chat-header { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+.chat-header strong, .chat-header small { display: block; }
+.chat-header small { margin-top: 3px; color: var(--slate); font-size: 11px; text-transform: capitalize; }
+.chat-back { display: none; }
+.chat-messages { flex: 1; display: flex; flex-direction: column; gap: 8px; padding: 20px; overflow-y: auto; background: #f7f9f7; }
+.chat-messages > .empty { margin: auto; }
+.bubble { align-self: flex-start; max-width: 75%; padding: 9px 12px; border: 1px solid var(--line); border-radius: 12px 12px 12px 4px; background: #fff; }
+.bubble.mine { align-self: flex-end; border-color: #d6e5f7; border-radius: 12px 12px 4px 12px; background: var(--accent-soft); }
+.bubble p { margin: 0; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.bubble small { display: block; margin-top: 4px; color: var(--slate); font-size: 10px; }
+.bubble.mine small { text-align: right; }
+.chat-compose { display: flex; gap: 10px; padding: 12px; border-top: 1px solid var(--line); }
+.chat-compose textarea { min-height: 46px; resize: none; }
+.chat-compose .primary:disabled { opacity: .5; cursor: default; }
+
 /* ---------- Report forms ---------- */
 .form-toolbar { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; align-items: end; margin-bottom: 18px; }
 .form-toolbar label, .entry-card label, .modal label { display: flex; flex-direction: column; gap: 7px; font-size: 11px; font-weight: 700; color: var(--slate); }
@@ -200,6 +234,7 @@ summary { cursor: pointer; color: var(--green); font-weight: 700; }
 .login-form label { display: flex; flex-direction: column; gap: 7px; font-size: 12px; font-weight: 700; margin-top: 8px; }
 .login-form .primary { margin-top: 12px; display: flex; justify-content: space-between; }
 .login-form small { text-align: center; margin-top: 10px; }
+.login-form .text { align-self: center; font-size: 13px; }
 
 /* ---------- Tablet (≤1100px) ---------- */
 @media (max-width: 1100px) {
@@ -231,16 +266,20 @@ summary { cursor: pointer; color: var(--green); font-weight: 700; }
   .login-intro { min-height: 42vh; padding: 35px; }
   .login-intro h1 { margin: 12vh 0 15px; }
   .login-form { padding: 40px 28px; }
+  .chat { grid-template-columns: 1fr; height: calc(100vh - 162px); height: calc(100dvh - 162px); }
+  .chat.has-active .chat-people, .chat:not(.has-active) .chat-thread { display: none; }
+  .chat-back { display: inline; }
 }
 
 /* ---------- Phone (≤600px): bottom tab bar, logo moves into the header ---------- */
 @media (max-width: 600px) {
   body { padding-bottom: 70px; }
-  .rail { position: fixed; z-index: 10; bottom: 0; left: 0; width: 100%; height: 70px; padding: 8px 10px; flex-direction: row; justify-content: space-between; border-top: 1px solid #36564b; }
+  .rail { position: fixed; z-index: 10; bottom: 0; left: 0; width: 100%; height: 70px; padding: 8px 10px; flex-direction: row; justify-content: space-between; gap: 0; border-top: 1px solid #36564b; }
   .rail > .property-mark { display: none; }
-  .rail nav { flex: 1; flex-direction: row; justify-content: space-around; min-width: 0; }
+  .rail nav { flex: 1; flex-direction: row; justify-content: space-around; gap: 2px; min-width: 0; }
+  .chat { height: calc(100vh - 240px); height: calc(100dvh - 240px); min-height: 320px; }
   .rail nav button { flex: 1; min-width: 0; padding: 3px 2px; font-size: 9px; }
-  .logout { align-self: center; margin: 0; min-width: 58px; padding: 3px 2px; }
+  .logout { align-self: center; margin: 0; min-width: 48px; padding: 3px 2px; }
   .property-mark { width: 52px; height: 52px; flex: 0 0 42px; }
   .content { padding-bottom: 8px; }
   header { min-height: 86px; gap: 12px; }

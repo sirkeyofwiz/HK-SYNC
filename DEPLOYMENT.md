@@ -16,8 +16,10 @@ The API uses SQLite at `backend/data/bahari.sqlite`. The Render persistent disk 
 - `JWT_SECRET`: long random secret, never commit it.
 - `CLIENT_URL`: comma-separated frontend origin(s), with no trailing slash.
 - `VITE_API_URL`: the public API origin, with no trailing `/api` suffix.
+- `RESEND_API_KEY` and `EMAIL_FROM` (optional): turn on "Forgot password" emails via Resend. `EMAIL_FROM` must be on a domain verified in Resend, e.g. `HK SYNC <noreply@yourhotel.com>`. Without them, managers can still create a 24-hour reset link from the People page and pass it on.
+- `APP_URL` (optional): the frontend URL used in reset links; defaults to the first `CLIENT_URL`.
 - `SEED_MANAGER_PASSWORD` (optional): initial manager password for an empty database. If unset in production, a random one is generated and printed once in the logs.
-- `NODE_ENV=production`: reset tokens are not returned in API responses in production. Connect the reset flow to an email provider before enabling self-service password reset.
+- `NODE_ENV=production`: "Forgot password" never returns the reset link in the response (only by email); a manager's "Reset password" always returns a 24-hour link so it can be handed over in person. Self-service reset emails need `RESEND_API_KEY` and `EMAIL_FROM`.
 
 ## Local preview
 

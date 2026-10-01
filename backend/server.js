@@ -50,7 +50,7 @@ if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
   throw new Error('JWT_SECRET must be configured in production.');
 }
 const JWT_SECRET = process.env.JWT_SECRET || 'local-development-secret';
-const onlineUsers = new Map();
+const onlineUsers = new Map(); // userId -> Set of socket ids
 const roleReportTypes = {
   supervisor: ['neglected', 'quality', 'trolley_pantry', 'handover'],
   storekeeper: ['tools'],
@@ -130,7 +130,7 @@ function sanitizeUser(user) {
     avatar: user.avatar,
     status: user.status,
     createdAt: user.createdAt,
-    isOnline: Boolean(onlineUsers.get(user.id))
+    isOnline: (onlineUsers.get(user.id)?.size || 0) > 0
   };
 }
 
@@ -191,6 +191,53 @@ function buildMessageEntry(message) {
   };
 }
 
+// JWT iat has one-second precision, so compare at that precision.
+function issuedBeforePasswordChange(decoded, user) {
+  return Boolean(user.passwordChangedAt) && decoded.iat < Math.floor(user.passwordChangedAt / 1000);
+}
+
+function setPassword(user, hashedPassword) {
+  user.password = hashedPassword;
+  user.passwordChangedAt = Date.now();
+  delete user.resetTokenHash;
+  delete user.resetTokenExpiresAt;
+}
+
+// Password reset links point at the frontend; APP_URL overrides, otherwise the first CLIENT_URL origin.
+const APP_URL = (process.env.APP_URL || (process.env.CLIENT_URL || '').split(',')[0].trim()
+  || (process.env.NODE_ENV === 'production' ? 'https://bahari-operations-web-production.up.railway.app' : 'http://localhost:5173')).replace(/\/+$/, '');
+const emailConfigured = Boolean(process.env.RESEND_API_KEY && process.env.EMAIL_FROM);
+
+function issueResetLink(user, ttlMs) {
+  const resetToken = randomBytes(32).toString('hex');
+  user.resetTokenHash = createHash('sha256').update(resetToken).digest('hex');
+  user.resetTokenExpiresAt = Date.now() + ttlMs;
+  saveRow('users', user);
+  return { resetToken, resetLink: `${APP_URL}/?reset=${resetToken}` };
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+}
+
+// Sends through Resend's HTTP API (https://resend.com/docs/api-reference/emails/send-email); no SDK needed.
+async function sendResetEmail(user, resetLink, validFor) {
+  if (!emailConfigured) return false;
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from: process.env.EMAIL_FROM,
+      to: [user.email],
+      subject: 'Reset your HK SYNC password',
+      text: `Hello ${user.name},\n\nUse this link to set a new HK SYNC password (valid for ${validFor}):\n${resetLink}\n\nIf you didn't ask for this, you can ignore this email.`,
+      html: `<p>Hello ${escapeHtml(user.name)},</p><p><a href="${resetLink}">Set a new HK SYNC password</a> (valid for ${validFor}).</p><p>If you didn't ask for this, you can ignore this email.</p>`
+    })
+  });
+  if (!response.ok) throw new Error(`Resend responded ${response.status}: ${(await response.text()).slice(0, 200)}`);
+  return true;
+}
+
 function authMiddleware(req, res, next) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
@@ -202,7 +249,7 @@ function authMiddleware(req, res, next) {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     const user = state.users.find((entry) => entry.id === decoded.id);
-    if (!user || user.active === false) {
+    if (!user || user.active === false || issuedBeforePasswordChange(decoded, user)) {
       return res.status(401).json({ message: 'This account is no longer active.' });
     }
     req.user = decoded;
@@ -282,13 +329,26 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.post('/api/auth/forgot-password', async (req, res) => {
   const email = String(req.body?.email || '').trim().toLowerCase();
+  const response = { message: "If that account exists, we've emailed a link to reset the password. Ask a manager if it doesn't arrive." };
+  const emailKey = `forgot:${email}`;
+  const ipKey = `forgot-ip:${clientIp(req)}`;
+  if ((failuresFor(ipKey)?.count || 0) >= 10) {
+    return res.status(429).json({ message: 'Too many reset requests. Try again later.' });
+  }
+  recordLoginFailure(ipKey);
+  // Cap emails per address so the form can't be used to flood someone's inbox; the response doesn't change.
+  if ((failuresFor(emailKey)?.count || 0) >= 3) return res.json(response);
+  recordLoginFailure(emailKey);
+
   const user = state.users.find((entry) => entry.email === email && entry.active !== false);
-  const response = { message: 'If that account exists, a password reset link has been created.' };
   if (user) {
-    const resetToken = randomBytes(32).toString('hex');
-    user.resetTokenHash = createHash('sha256').update(resetToken).digest('hex');
-    user.resetTokenExpiresAt = Date.now() + 15 * 60 * 1000;
-    saveRow('users', user);
+    const { resetToken, resetLink } = issueResetLink(user, 60 * 60 * 1000);
+    try {
+      const sent = await sendResetEmail(user, resetLink, '1 hour');
+      if (!sent) console.warn('Password reset requested but email is not configured (set RESEND_API_KEY and EMAIL_FROM).');
+    } catch (error) {
+      console.error('Password reset email failed:', error.message);
+    }
     if (process.env.NODE_ENV !== 'production') response.resetToken = resetToken;
   }
   return res.json(response);
@@ -302,10 +362,9 @@ app.post('/api/auth/reset-password', async (req, res) => {
   const tokenHash = createHash('sha256').update(token).digest('hex');
   const user = state.users.find((entry) => entry.resetTokenHash === tokenHash && Number(entry.resetTokenExpiresAt) > Date.now());
   if (!user) return res.status(400).json({ message: 'This reset link is invalid or expired.' });
-  user.password = await bcrypt.hash(password, 10);
-  delete user.resetTokenHash;
-  delete user.resetTokenExpiresAt;
+  setPassword(user, await bcrypt.hash(password, 10));
   saveRow('users', user);
+  io.in(user.id).disconnectSockets(true);
   return res.json({ message: 'Password reset successfully. You can now sign in.' });
 });
 
@@ -329,11 +388,11 @@ app.post('/api/users/me/password', authMiddleware, async (req, res) => {
   if (!(await bcrypt.compare(currentPassword, user.password))) {
     return res.status(400).json({ message: 'Your current password is incorrect.' });
   }
-  user.password = await bcrypt.hash(newPassword, 10);
-  delete user.resetTokenHash;
-  delete user.resetTokenExpiresAt;
+  setPassword(user, await bcrypt.hash(newPassword, 10));
   saveRow('users', user);
-  return res.json({ message: 'Password changed.' });
+  // Other sessions (other devices, or someone with the old password) are now signed out; this one gets a fresh token.
+  io.in(user.id).disconnectSockets(true);
+  return res.json({ message: 'Password changed. Other devices have been signed out.', token: createToken(user) });
 });
 
 app.get('/api/users', authMiddleware, (req, res) => {
@@ -396,6 +455,7 @@ app.patch('/api/users/:id/status', authMiddleware, requireManager, (req, res) =>
   if (!canManageRole(req.currentUser, user.role)) return res.status(403).json({ message: 'You cannot change this account.' });
   user.active = Boolean(req.body?.active);
   saveRow('users', user);
+  if (!user.active) io.in(user.id).disconnectSockets(true);
   return res.json({ user: sanitizeUser(user) });
 });
 
@@ -403,13 +463,14 @@ app.post('/api/users/:id/reset-password', authMiddleware, requireManager, async 
   const user = state.users.find((entry) => entry.id === req.params.id);
   if (!user) return res.status(404).json({ message: 'User not found.' });
   if (!canManageRole(req.currentUser, user.role)) return res.status(403).json({ message: "You cannot reset this account's password." });
-  const resetToken = randomBytes(32).toString('hex');
-  user.resetTokenHash = createHash('sha256').update(resetToken).digest('hex');
-  user.resetTokenExpiresAt = Date.now() + 15 * 60 * 1000;
-  saveRow('users', user);
-  const response = { message: 'A password reset link has been created.' };
-  if (process.env.NODE_ENV !== 'production') response.resetToken = resetToken;
-  return res.json(response);
+  const { resetLink } = issueResetLink(user, 24 * 60 * 60 * 1000);
+  let emailed = false;
+  try {
+    emailed = await sendResetEmail(user, resetLink, '24 hours');
+  } catch (error) {
+    console.error('Password reset email failed:', error.message);
+  }
+  return res.json({ resetLink, emailed, message: emailed ? `Reset link emailed to ${user.email}.` : 'Reset link created.' });
 });
 
 app.get('/api/reports', authMiddleware, (req, res) => {
@@ -495,6 +556,33 @@ app.patch('/api/tasks/:id/status', authMiddleware, (req, res) => {
   return res.json({ task });
 });
 
+// One summary per person you have messaged: last message and how many of theirs you haven't read.
+app.get('/api/messages', authMiddleware, (req, res) => {
+  const summaries = new Map();
+  for (const msg of state.messages) {
+    if (msg.senderId !== req.user.id && msg.receiverId !== req.user.id) continue;
+    const otherId = msg.senderId === req.user.id ? msg.receiverId : msg.senderId;
+    const summary = summaries.get(otherId) || { userId: otherId, lastMessage: null, unread: 0 };
+    if (!summary.lastMessage || new Date(msg.createdAt) > new Date(summary.lastMessage.createdAt)) summary.lastMessage = buildMessageEntry(msg);
+    if (msg.receiverId === req.user.id && !msg.read) summary.unread += 1;
+    summaries.set(otherId, summary);
+  }
+  return res.json({ conversations: [...summaries.values()] });
+});
+
+app.post('/api/messages/:userId/read', authMiddleware, (req, res) => {
+  let updated = 0;
+  for (const msg of state.messages) {
+    if (msg.senderId === req.params.userId && msg.receiverId === req.user.id && !msg.read) {
+      msg.read = true;
+      saveRow('messages', msg);
+      updated += 1;
+    }
+  }
+  if (updated) io.to(req.user.id).emit('messages:read', { userId: req.params.userId });
+  return res.json({ updated });
+});
+
 app.get('/api/messages/:userId', authMiddleware, (req, res) => {
   const withUserId = req.params.userId;
   const messages = state.messages
@@ -516,8 +604,14 @@ app.post('/api/messages', authMiddleware, (req, res) => {
   }
 
   const receiver = state.users.find((user) => user.id === receiverId);
-  if (!receiver) {
+  if (!receiver || receiver.active === false) {
     return res.status(404).json({ message: 'Recipient user not found.' });
+  }
+  if (receiverId === req.user.id) {
+    return res.status(400).json({ message: 'You cannot message yourself.' });
+  }
+  if (String(text).trim().length > 2000) {
+    return res.status(400).json({ message: 'Messages can be at most 2000 characters.' });
   }
 
   const message = {
@@ -544,7 +638,7 @@ io.use((socket, next) => {
   try {
     const decoded = jwt.verify(socket.handshake.auth?.token || '', JWT_SECRET);
     const user = state.users.find((entry) => entry.id === decoded.id);
-    if (!user || user.active === false) return next(new Error('Unauthorized'));
+    if (!user || user.active === false || issuedBeforePasswordChange(decoded, user)) return next(new Error('Unauthorized'));
     socket.authUserId = user.id;
     next();
   } catch (error) {
@@ -553,31 +647,20 @@ io.use((socket, next) => {
 });
 
 io.on('connection', (socket) => {
-  socket.on('register-user', () => {
-    const userId = socket.authUserId;
+  const userId = socket.authUserId;
+  socket.join(userId);
+  const sockets = onlineUsers.get(userId) || new Set();
+  sockets.add(socket.id);
+  onlineUsers.set(userId, sockets);
+  if (sockets.size === 1) io.emit('presence:update', { userId, isOnline: true });
 
-    onlineUsers.set(userId, socket.id);
-    socket.join(userId);
-    socket.userId = userId;
-
-    const user = state.users.find((entry) => entry.id === userId);
-    if (user) {
-      user.status = 'online';
-      saveRow('users', user);
-    }
-
-    io.emit('presence:update', { userId, isOnline: true });
-  });
+  socket.on('register-user', () => {});
 
   socket.on('disconnect', () => {
-    const userId = socket.userId;
-    if (userId) {
+    const remaining = onlineUsers.get(userId);
+    remaining?.delete(socket.id);
+    if (!remaining?.size) {
       onlineUsers.delete(userId);
-      const user = state.users.find((entry) => entry.id === userId);
-      if (user) {
-        user.status = 'offline';
-        saveRow('users', user);
-      }
       io.emit('presence:update', { userId, isOnline: false });
     }
   });

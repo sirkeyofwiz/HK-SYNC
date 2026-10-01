@@ -10,6 +10,8 @@ HK-SYNC is a housekeeping operations command centre. It brings inspections, shif
 - Manager review, sign-off, and follow-up task dispatch
 - Staff performance and daily score views
 - Excel and PDF report exports
+- Direct messages between staff with live delivery, unread counts and online status
+- Password reset by email (optional) or by manager-issued link
 - SQLite persistence and Socket.IO-ready backend architecture
 
 ## Project structure
@@ -71,6 +73,8 @@ The backend uses these environment variables:
 - `CLIENT_URL` - comma-separated frontend origin(s), without trailing slashes
 - `NODE_ENV=production` - enables production behavior
 - `SEED_MANAGER_PASSWORD` - optional; initial manager password when the database is empty
+- `RESEND_API_KEY`, `EMAIL_FROM` - optional; enable "Forgot password" emails through [Resend](https://resend.com). `EMAIL_FROM` must use a domain verified in Resend
+- `APP_URL` - optional; frontend URL used in password reset links (defaults to the first `CLIENT_URL`)
 
 The frontend uses:
 
