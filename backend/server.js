@@ -319,6 +319,9 @@ function setPassword(user, hashedPassword) {
 const APP_URL = (process.env.APP_URL || (process.env.CLIENT_URL || '').split(',')[0].trim()
   || (process.env.NODE_ENV === 'production' ? 'https://bahari-operations-web-production.up.railway.app' : 'http://localhost:5173')).replace(/\/+$/, '');
 const emailConfigured = Boolean(process.env.RESEND_API_KEY && process.env.EMAIL_FROM);
+// Without email in production nobody could receive a self-service link, so staff are pointed to a manager instead.
+// Development keeps the flow on (the link comes back in the response) so it can be tested locally.
+const selfServiceReset = emailConfigured || process.env.NODE_ENV !== 'production';
 
 function issueResetLink(user, ttlMs) {
   const resetToken = randomBytes(32).toString('hex');
@@ -439,7 +442,12 @@ app.post('/api/auth/login', async (req, res) => {
   return res.json({ token, user: sanitizeUser(user) });
 });
 
+app.get('/api/auth/options', (req, res) => {
+  res.json({ emailReset: selfServiceReset });
+});
+
 app.post('/api/auth/forgot-password', async (req, res) => {
+  if (!selfServiceReset) return res.json({ message: "Password reset by email isn't set up. Ask a manager to send you a reset link." });
   const email = String(req.body?.email || '').trim().toLowerCase();
   const response = { message: "If that account exists, we've emailed a link to reset the password. Ask a manager if it doesn't arrive." };
   const emailKey = `forgot:${email}`;
@@ -456,8 +464,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
   if (user) {
     const { resetToken, resetLink } = issueResetLink(user, 60 * 60 * 1000);
     try {
-      const sent = await sendResetEmail(user, resetLink, '1 hour');
-      if (!sent) console.warn('Password reset requested but email is not configured (set RESEND_API_KEY and EMAIL_FROM).');
+      await sendResetEmail(user, resetLink, '1 hour');
     } catch (error) {
       console.error('Password reset email failed:', error.message);
     }
