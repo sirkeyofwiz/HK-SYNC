@@ -1,5 +1,5 @@
-const CACHE_NAME = 'hk-sync-shell-v2';
-const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/logo.png'];
+const CACHE_NAME = 'hk-sync-shell-v3';
+const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/logo-mark.webp'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
