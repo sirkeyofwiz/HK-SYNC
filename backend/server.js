@@ -648,6 +648,12 @@ app.put('/api/goals', authMiddleware, requireManager, (req, res) => {
   for (const [section, clean] of Object.entries(GOALS_SHAPE)) {
     if (req.body?.[section] === undefined) continue;
     if (!Array.isArray(req.body[section])) return res.status(400).json({ message: `${section} must be a list.` });
+    if (section !== 'smartGoals') {
+      const names = req.body[section].map((row) => cleanName(row?.name));
+      if (names.some((name) => !name)) return res.status(400).json({ message: 'Every person needs a name.' });
+      const repeated = names.find((name, index) => names.findIndex((other) => nameKey(other) === nameKey(name)) !== index);
+      if (repeated) return res.status(400).json({ message: `"${repeated}" is listed twice.` });
+    }
     goals[section] = clean(req.body[section]);
   }
   goals.updatedAt = new Date().toISOString();

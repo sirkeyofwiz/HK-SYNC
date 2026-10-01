@@ -214,8 +214,15 @@ header .kicker { font-size: 18px; color: var(--accent); }
 .smart-row .progress, .smart-row > span { align-self: center; }
 .smart-row > span:last-child { font-size: 12px; font-weight: 700; text-align: right; }
 .smart-row .no-target { grid-column: span 2; font-size: 12px; font-weight: 400; text-align: left; }
-.progress-table.hk .table-head, .progress-table.hk .table-row { grid-template-columns: minmax(150px, 1.4fr) repeat(5, 1fr); gap: 10px; }
-.progress-table.pa .table-head, .progress-table.pa .table-row { grid-template-columns: minmax(140px, 1.3fr) repeat(4, .8fr) 2fr; gap: 10px; }
+.progress-table.hk .table-head, .progress-table.hk .table-row { grid-template-columns: minmax(160px, 1.5fr) repeat(5, 1fr) 28px; gap: 10px; }
+.progress-table.pa .table-head, .progress-table.pa .table-row { grid-template-columns: minmax(150px, 1.3fr) repeat(4, .8fr) 2fr 28px; gap: 10px; }
+.name-cell input { font-weight: 700; }
+.remove-row { width: 28px; height: 28px; border-radius: 50%; background: transparent; color: var(--slate); font-size: 18px; line-height: 1; }
+.remove-row:hover { background: #fbe9e8; color: var(--red); }
+.goals-section > .add { margin-top: 12px; }
+.save-bar { display: flex; align-items: center; gap: 12px; }
+.save-bar .unsaved { color: var(--gold); font-size: 12px; font-weight: 700; }
+.save-bar .primary:disabled { opacity: .45; cursor: default; }
 .score-cell { display: flex; flex-direction: column; gap: 4px; }
 .score-cell input { padding: 7px 9px; }
 .cell-label { display: none; color: var(--slate); font-size: 10px; font-weight: 700; }
@@ -230,8 +237,9 @@ header .kicker { font-size: 18px; color: var(--accent); }
 .glance-stats strong { display: block; font-size: 22px; }
 .glance-stats small { color: var(--slate); font-size: 11px; }
 .glance-goal { display: grid; grid-template-columns: minmax(0, 1fr) 1.2fr; align-items: center; gap: 12px; padding: 7px 0; font-size: 12px; }
-.columns.glance { margin-bottom: 20px; }
-.columns.glance .task { margin: 8px 0 0; }
+.dash-top, .dash-bottom { display: grid; gap: 20px; margin-bottom: 20px; }
+.dash-top .trend { margin-bottom: 0; }
+.dash-bottom .task { margin: 8px 0 0; }
 .account-logout { display: none; margin-top: 18px; }
 
 /* ---------- Report forms ---------- */
@@ -296,6 +304,25 @@ summary { cursor: pointer; color: var(--green); font-weight: 700; }
   .table-foot { position: sticky; bottom: 0; }
   .chart { height: 160px; }
   .columns > .panel { max-height: 320px; overflow-y: auto; }
+  .overview .heading { margin: 4px 0 18px; }
+  .overview .metrics { margin-bottom: 18px; }
+  .overview .metric { padding: 12px 16px; }
+  .overview .metric strong { font-size: 26px; margin: 6px 0 2px; }
+  .dashboard .dash-top { grid-template-columns: 1.45fr .8fr; height: 238px; margin-bottom: 18px; }
+  .dashboard .dash-top > .panel { min-height: 0; overflow-y: auto; padding: 18px 20px; }
+  .dashboard .quick { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; align-content: start; }
+  .dashboard .quick > .kicker, .dashboard .quick > h3 { grid-column: 1 / -1; }
+  .dashboard .quick > .kicker { margin-bottom: 6px; }
+  .dashboard .quick > h3, .dashboard .quick button b { display: none; }
+  .dashboard .quick button { margin: 0; padding: 8px 10px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* With an odd number of report types the last button sits alone, so let it use the full row. */
+  .dashboard .quick button:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .dashboard .quick button span { font-size: 15px; margin-right: 6px; }
+  .dashboard .dash-top .panel-title { margin-bottom: 8px; }
+  .dashboard .chart { height: 126px; }
+  .dashboard .dash-bottom { grid-template-columns: repeat(3, minmax(0, 1fr)); height: calc(100vh - 651px); min-height: 240px; margin-bottom: 0; }
+  .dashboard .dash-bottom.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dashboard .dash-bottom > .panel { min-height: 0; overflow-y: auto; }
   .staff-list { max-height: 260px; overflow-y: auto; }
   .goals-points { grid-template-columns: 1fr 1fr; }
   .points-list { max-height: 360px; }
@@ -340,8 +367,9 @@ summary { cursor: pointer; color: var(--green); font-weight: 700; }
   .smart-row { grid-template-columns: 1fr 1fr; align-items: end; }
   .smart-row strong, .smart-row .progress, .smart-row > span { grid-column: 1 / -1; }
   .smart-row > span:last-child { text-align: left; }
-  .progress-table .table-row { grid-template-columns: 1fr 1fr; }
-  .progress-table .table-row > strong { grid-column: 1 / -1; }
+  .progress-table.hk .table-row, .progress-table.pa .table-row { grid-template-columns: 1fr 1fr; }
+  .progress-table .table-row > .name-cell { grid-column: 1 / -1; }
+  .progress-table .table-row > .remove-row { justify-self: start; }
 }
 
 /* ---------- Phone (≤600px): bottom tab bar, logo moves into the header ---------- */
