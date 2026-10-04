@@ -489,9 +489,11 @@ function buildMessageEntry(message) {
       senderId: replied.senderId,
       deleted: Boolean(replied.deletedAt),
       text: replied.deletedAt ? '' : String(replied.text || '').slice(0, 160),
-      attachmentKind: !replied.deletedAt && replied.attachments?.length ? attachmentView(replied.attachments[0])?.kind || null : null
+      attachmentKind: !replied.deletedAt && replied.attachments?.length ? attachmentView(replied.attachments[0])?.kind || null : null,
+      shareKind: !replied.deletedAt ? replied.share?.kind || null : null
     } : null,
-    reactions: deleted ? {} : message.reactions || {}
+    reactions: deleted ? {} : message.reactions || {},
+    share: deleted ? null : shareView(message.share)
   };
 }
 
@@ -786,6 +788,7 @@ app.post('/api/users/:id/reset-password', authMiddleware, requireManager, async 
 
 app.get('/api/reports', authMiddleware, (req, res) => {
   const viewer = currentUser(req);
+  const discussions = discussionIndex(req.user.id);
   const reports = state.reports
     .filter((report) => !report.voided)
     .filter((report) => ['manager', 'assistant_manager'].includes(viewer?.role) || report.submittedBy === req.user.id)
@@ -793,7 +796,8 @@ app.get('/api/reports', authMiddleware, (req, res) => {
       ...report,
       data: withoutPhotos(report.data),
       submitter: sanitizeUser(state.users.find((user) => user.id === report.submittedBy) || {}),
-      ...reportSummary(report)
+      ...reportSummary(report),
+      discussion: discussions.get(`report:${report.id}`) || null
     }))
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   return res.json({ reports });
@@ -803,10 +807,8 @@ app.get('/api/reports', authMiddleware, (req, res) => {
 app.get('/api/reports/:id', authMiddleware, (req, res) => {
   const viewer = currentUser(req);
   const report = state.reports.find((entry) => entry.id === req.params.id && !entry.voided);
-  if (!report || (!['manager', 'assistant_manager'].includes(viewer?.role) && report.submittedBy !== req.user.id)) {
-    return res.status(404).json({ message: 'Report not found.' });
-  }
-  return res.json({ report: { ...report, submitter: sanitizeUser(state.users.find((user) => user.id === report.submittedBy) || {}), ...reportSummary(report) } });
+  if (!canSeeReport(viewer, report)) return res.status(404).json({ message: 'Report not found.' });
+  return res.json({ report: { ...report, submitter: sanitizeUser(state.users.find((user) => user.id === report.submittedBy) || {}), ...reportSummary(report), threshold: FLAG_THRESHOLDS[report.type] ?? 6, discussion: discussionIndex(req.user.id).get(`report:${report.id}`) || null, canManage: isManagerRole(viewer) } });
 });
 
 app.post('/api/reports', authMiddleware, (req, res) => {
@@ -923,8 +925,18 @@ app.post('/api/reports/:id/sign', authMiddleware, requireManager, (req, res) => 
 });
 
 app.get('/api/tasks', authMiddleware, (req, res) => {
-  const tasks = state.tasks.filter((task) => task.assignedTo === req.user.id || ['manager', 'assistant_manager'].includes(state.users.find((user) => user.id === req.user.id)?.role));
+  const discussions = discussionIndex(req.user.id);
+  const tasks = state.tasks.filter((task) => task.assignedTo === req.user.id || ['manager', 'assistant_manager'].includes(state.users.find((user) => user.id === req.user.id)?.role))
+    .map((task) => ({ ...task, discussion: discussions.get(`task:${task.id}`) || null }));
   return res.json({ tasks });
+});
+
+app.get('/api/tasks/:id', authMiddleware, (req, res) => {
+  const viewer = currentUser(req);
+  const task = state.tasks.find((entry) => entry.id === req.params.id);
+  if (!canSeeTask(viewer, task)) return res.status(404).json({ message: 'Task not found.' });
+  const nameOf = (id) => state.users.find((user) => user.id === id)?.name || null;
+  return res.json({ task: { ...task, assigneeName: nameOf(task.assignedTo), assignedByName: nameOf(task.assignedBy), discussion: discussionIndex(req.user.id).get(`task:${task.id}`) || null, canUpdate: isManagerRole(viewer) || task.assignedTo === req.user.id } });
 });
 
 app.post('/api/tasks', authMiddleware, requireManager, (req, res) => {
@@ -1046,6 +1058,78 @@ function ownMessage(req, res) {
   return message;
 }
 
+// ---------- Sharing reports and tasks in chat ----------
+// You can open a report or task if it's yours, if you're a manager, or if someone shared it with you in a conversation.
+const isManagerRole = (user) => ['manager', 'assistant_manager'].includes(user?.role);
+const sharedWith = (kind, id, userId) => state.messages.some((message) => !message.deletedAt && message.share?.kind === kind && message.share.id === id && inMessage(message, userId));
+function canSeeReport(user, report) {
+  return Boolean(user && report && !report.voided && (isManagerRole(user) || report.submittedBy === user.id || sharedWith('report', report.id, user.id)));
+}
+function canSeeTask(user, task) {
+  return Boolean(user && task && (isManagerRole(user) || task.assignedTo === user.id || sharedWith('task', task.id, user.id)));
+}
+const LINE_LISTS = ['entries', 'trolleys', 'pantries'];
+
+function lineLabel(report, list, entry, index) {
+  if (list === 'trolleys') return entry.block ? `Trolley · Block ${entry.block}` : `Trolley ${index + 1}`;
+  if (list === 'pantries') return entry.block ? `Pantry · Block ${entry.block}` : `Pantry ${index + 1}`;
+  if (report.type === 'tools') return entry.tool || `Tool ${index + 1}`;
+  if (report.type === 'guest_interaction') return entry.hkName || `Housekeeper ${index + 1}`;
+  return entry.room ? `Room ${entry.room}` : `Line ${index + 1}`;
+}
+
+// What a chat card shows: always the item's current state, not a copy from when it was shared.
+function shareView(share) {
+  if (!share) return null;
+  if (share.kind === 'report') {
+    const report = state.reports.find((entry) => entry.id === share.id && !entry.voided);
+    if (!report) return { kind: 'report', id: share.id, missing: true };
+    const summary = reportSummary(report);
+    let line = null;
+    const entry = share.line ? report.data?.[share.line.list]?.[share.line.index] : null;
+    if (entry) {
+      const threshold = FLAG_THRESHOLDS[report.type] ?? 6;
+      const scores = Object.keys(entry.scores || {}).map((key) => [key, itemScore(entry, key)]).filter(([, value]) => value !== null);
+      line = { ...share.line, label: lineLabel(report, share.line.list, entry, share.line.index), hkName: entry.hkName || null, low: scores.filter(([, value]) => value < threshold).map(([key, value]) => `${key} ${value}`), remarks: entry.remarks || '' };
+    }
+    return {
+      kind: 'report', id: report.id, type: report.type, date: report.date,
+      submitterName: state.users.find((user) => user.id === report.submittedBy)?.name || 'Unknown',
+      place: report.data?.area || report.data?.block || report.data?.vehicleId || '',
+      supervisorName: report.data?.supervisorName || null,
+      flagged: summary.flagged, itemCount: summary.itemCount, flaggedCount: summary.flaggedCount, signed: Boolean(report.hodSignedAt), line
+    };
+  }
+  if (share.kind === 'task') {
+    const task = state.tasks.find((entry) => entry.id === share.id);
+    if (!task) return { kind: 'task', id: share.id, missing: true };
+    return { kind: 'task', id: task.id, title: task.title, location: task.location, status: task.status, priority: task.priority, dueDate: task.dueDate, assigneeName: state.users.find((user) => user.id === task.assignedTo)?.name || null };
+  }
+  return null;
+}
+
+// For the 💬 marker: conversations *you* took part in that shared each report or task.
+function discussionIndex(userId) {
+  const index = new Map();
+  for (const message of state.messages) {
+    if (message.deletedAt || !message.share || !inMessage(message, userId)) continue;
+    const key = `${message.share.kind}:${message.share.id}`;
+    const entry = index.get(key) || { count: 0, lastAt: '', withUserId: null, sharedBy: null, sharedAt: '' };
+    entry.count += 1;
+    // The latest person who sent *you* this item: the natural person to ask back.
+    if (message.receiverId === userId && String(message.createdAt) > entry.sharedAt) {
+      entry.sharedAt = String(message.createdAt);
+      entry.sharedBy = message.senderId;
+    }
+    if (String(message.createdAt) > entry.lastAt) {
+      entry.lastAt = String(message.createdAt);
+      entry.withUserId = message.senderId === userId ? message.receiverId : message.senderId;
+    }
+    index.set(key, entry);
+  }
+  return index;
+}
+
 // One summary per person you have messaged: last message and how many of theirs you haven't read.
 app.get('/api/messages', authMiddleware, (req, res) => {
   const summaries = new Map();
@@ -1090,14 +1174,34 @@ app.get('/api/messages/:userId', authMiddleware, (req, res) => {
 });
 
 app.post('/api/messages', authMiddleware, (req, res) => {
-  const { receiverId, text, replyTo } = req.body || {};
+  const { receiverId, text, replyTo, share } = req.body || {};
   const attachmentIds = Array.isArray(req.body?.attachments) ? [...new Set(req.body.attachments)].slice(0, 10) : [];
 
-  if (!receiverId || (!String(text || '').trim() && !attachmentIds.length)) {
+  if (!receiverId || (!String(text || '').trim() && !attachmentIds.length && !share)) {
     return res.status(400).json({ message: 'Write a message or add an attachment.' });
   }
   if (attachmentIds.some((id) => state.attachments.find((entry) => entry.id === id)?.ownerId !== req.user.id)) {
     return res.status(400).json({ message: 'One of the attachments could not be found. Try adding it again.' });
+  }
+  let cleanShare = null;
+  if (share) {
+    const viewer = currentUser(req);
+    if (share.kind === 'report') {
+      const report = state.reports.find((entry) => entry.id === share.id);
+      if (!canSeeReport(viewer, report)) return res.status(404).json({ message: 'Report not found.' });
+      cleanShare = { kind: 'report', id: report.id };
+      if (share.line) {
+        const index = Number(share.line.index);
+        if (!LINE_LISTS.includes(share.line.list) || !Number.isInteger(index) || !report.data?.[share.line.list]?.[index]) return res.status(400).json({ message: 'That line is not in this report.' });
+        cleanShare.line = { list: share.line.list, index };
+      }
+    } else if (share.kind === 'task') {
+      const task = state.tasks.find((entry) => entry.id === share.id);
+      if (!canSeeTask(viewer, task)) return res.status(404).json({ message: 'Task not found.' });
+      cleanShare = { kind: 'task', id: task.id };
+    } else {
+      return res.status(400).json({ message: 'Only reports and tasks can be shared.' });
+    }
   }
   const repliedTo = replyTo ? state.messages.find((entry) => entry.id === replyTo) : null;
   if (replyTo && (!repliedTo || !inMessage(repliedTo, req.user.id) || !inMessage(repliedTo, receiverId))) {
@@ -1122,6 +1226,7 @@ app.post('/api/messages', authMiddleware, (req, res) => {
     text: String(text || '').trim(),
     attachments: attachmentIds,
     replyTo: repliedTo?.id || null,
+    share: cleanShare,
     reactions: {},
     createdAt: new Date().toISOString(),
     read: false
@@ -1141,7 +1246,7 @@ app.post('/api/messages/forward', authMiddleware, (req, res) => {
   if (!receivers.length || receivers.some((user) => !user)) return res.status(400).json({ message: 'Choose who to forward it to.' });
   const author = original.forwardedFrom || { senderId: original.senderId, name: state.users.find((user) => user.id === original.senderId)?.name || 'Unknown' };
   const sent = receivers.map((receiver) => {
-    const message = { id: randomUUID(), senderId: req.user.id, receiverId: receiver.id, text: original.text, attachments: [...(original.attachments || [])], replyTo: null, forwardedFrom: author, reactions: {}, createdAt: new Date().toISOString(), read: false };
+    const message = { id: randomUUID(), senderId: req.user.id, receiverId: receiver.id, text: original.text, attachments: [...(original.attachments || [])], share: original.share || null, replyTo: null, forwardedFrom: author, reactions: {}, createdAt: new Date().toISOString(), read: false };
     state.messages.push(message);
     saveRow('messages', message);
     return emitMessage('new-message', message);

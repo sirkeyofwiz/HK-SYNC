@@ -378,6 +378,56 @@ main:has(> .notice) .chat { height: calc(100vh - 260px); }
 .progress-tiles div { display: flex; flex-direction: column; gap: 4px; padding: 10px; border-radius: 6px; background: #f7f9f7; font-size: 11px; color: var(--slate); }
 .progress-tiles b:not(.tag) { color: var(--ink); font-size: 18px; }
 
+/* ---------- Ask about this / report detail ---------- */
+.discussion-chip { margin-left: 6px; padding: 2px 7px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 800; }
+.row-actions .discussion-chip { padding: 6px 8px; border-radius: 5px; }
+button.report-line { width: 100%; background: none; text-align: left; color: inherit; }
+button.report-line:hover strong { color: var(--accent); }
+.ask-modal { gap: 14px; }
+.ask-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-left: 3px solid var(--accent); border-radius: 4px; background: #f2f6fb; }
+.ask-item > span { font-size: 18px; }
+.ask-item b, .ask-item small { display: block; }
+.ask-item small { color: var(--slate); font-size: 11px; }
+.ask-suggestions { display: flex; flex-wrap: wrap; gap: 6px; }
+.ask-suggestions button { padding: 6px 10px; border: 1px solid var(--line); border-radius: 14px; background: #fff; color: var(--ink); font-size: 12px; }
+.ask-suggestions button.active, .ask-suggestions button:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.ask-modal .primary { display: flex; justify-content: space-between; }
+.ask-modal .primary:disabled { opacity: .5; cursor: default; }
+.share-card { display: flex; flex-direction: column; gap: 3px; width: 100%; min-width: 220px; margin-bottom: 6px; padding: 10px 12px; border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 8px; background: #fff; text-align: left; color: var(--ink); font-size: 12px; }
+.share-card:hover { border-color: var(--accent); }
+.share-card.missing { color: var(--slate); font-style: italic; }
+.share-kind { color: var(--accent); font-size: 11px; font-weight: 800; }
+.share-card small { color: var(--slate); font-size: 11px; }
+.share-line { margin-top: 4px; padding: 6px 8px; border-radius: 6px; background: #f7f9f7; font-size: 12px; }
+.share-line em { color: var(--red); font-style: normal; font-weight: 700; }
+.share-line i { display: block; margin-top: 2px; color: var(--slate); }
+.share-status { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.share-open { margin-left: auto; color: var(--accent); font-weight: 800; white-space: nowrap; }
+.share-status { flex-wrap: wrap; }
+/* A bubble holding a card gets more room, and the card never sticks out of it. */
+.bubble:has(.share-card) { width: min(88%, 420px); max-width: min(88%, 420px); }
+.bubble .share-card { min-width: 0; }
+.task-view h2 { margin: 0; }
+.task-facts, .report-facts, .line-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+.task-facts span, .report-facts span, .line-facts span { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.task-facts small, .report-facts small, .line-facts small { color: var(--slate); font-size: 11px; font-weight: 700; }
+.task-view .task-actions { flex-wrap: wrap; }
+.report-summary { margin-bottom: 18px; }
+.report-actions { flex-wrap: wrap; justify-content: start; margin-top: 16px; }
+.line-section { display: flex; flex-direction: column; gap: 12px; margin-bottom: 18px; }
+.line-card.flash { animation: bubble-flash 1.6s ease; }
+.line-card .entry-title { flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.line-hk { color: var(--slate); font-size: 12px; font-weight: 700; }
+.line-ask { margin-left: auto; padding: 6px 10px; border-radius: 5px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 700; }
+.line-scores { display: flex; flex-wrap: wrap; gap: 8px; }
+.line-scores span { display: flex; flex-direction: column; min-width: 92px; padding: 7px 10px; border-radius: 6px; background: #f7f9f7; font-size: 13px; }
+.line-scores small { color: var(--slate); font-size: 10px; font-weight: 700; }
+.line-scores span.low { background: #fbe9e8; }
+.line-scores span.low b { color: var(--red); }
+.line-remarks { margin: 12px 0 0; color: var(--ink); font-size: 13px; font-style: italic; }
+.line-photo { display: block; max-width: 320px; margin-top: 12px; }
+.vehicle-checks span { min-width: 120px; }
+
 /* ---------- Report forms ---------- */
 .form-toolbar { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; align-items: end; margin-bottom: 18px; }
 .form-toolbar label, .entry-card label, .modal label { display: flex; flex-direction: column; gap: 7px; font-size: 11px; font-weight: 700; color: var(--slate); }
@@ -500,6 +550,8 @@ summary { cursor: pointer; color: var(--green); font-weight: 700; }
   main:has(> .notice) .chat { height: calc(100dvh - 224px); }
   .chat.has-active .chat-people, .chat:not(.has-active) .chat-thread { display: none; }
   .chat-back { display: inline; }
+  .line-scores span { min-width: 0; flex: 1 1 40%; }
+  .line-ask { margin-left: 0; }
   .profile-cards { grid-template-columns: 1fr; }
   .item-row { grid-template-columns: minmax(0, 1fr) 70px 34px; }
   .item-row small { grid-column: 1 / -1; }
