@@ -215,7 +215,6 @@ header .kicker { font-size: 18px; color: var(--accent); }
 .smart-row > span:last-child { font-size: 12px; font-weight: 700; text-align: right; }
 .smart-row .no-target { grid-column: span 2; font-size: 12px; font-weight: 400; text-align: left; }
 .progress-table.hk .table-head, .progress-table.hk .table-row { grid-template-columns: minmax(160px, 1.5fr) repeat(5, 1fr) 28px; gap: 10px; }
-.progress-table.pa .table-head, .progress-table.pa .table-row { grid-template-columns: minmax(150px, 1.3fr) repeat(4, .8fr) 2fr 28px; gap: 10px; }
 .name-cell input { font-weight: 700; }
 .remove-row { width: 28px; height: 28px; border-radius: 50%; background: transparent; color: var(--slate); font-size: 18px; line-height: 1; }
 .remove-row:hover { background: #fbe9e8; color: var(--red); }
@@ -225,6 +224,13 @@ header .kicker { font-size: 18px; color: var(--accent); }
 .save-bar .primary:disabled { opacity: .45; cursor: default; }
 .score-cell { display: flex; flex-direction: column; gap: 4px; }
 .score-cell input { padding: 7px 9px; }
+.score-value { font-size: 15px; }
+.score-value small { font-size: 10px; font-weight: 400; }
+.smart-rate { display: flex; flex-direction: column; gap: 2px; }
+.smart-rate small { color: var(--slate); font-size: 11px; font-weight: 700; }
+.smart-rate small.muted { font-weight: 400; }
+.smart-rate b { font-size: 16px; }
+.goals-section .panel-title small { display: block; margin-top: 4px; font-size: 11px; }
 .cell-label { display: none; color: var(--slate); font-size: 10px; font-weight: 700; }
 .tag { align-self: start; padding: 2px 6px; border-radius: 10px; font-size: 9px; font-weight: 800; white-space: nowrap; }
 .tag.neutral { background: #eef1f0; color: var(--slate); }
@@ -367,7 +373,7 @@ summary { cursor: pointer; color: var(--green); font-weight: 700; }
   .smart-row { grid-template-columns: 1fr 1fr; align-items: end; }
   .smart-row strong, .smart-row .progress, .smart-row > span { grid-column: 1 / -1; }
   .smart-row > span:last-child { text-align: left; }
-  .progress-table.hk .table-row, .progress-table.pa .table-row { grid-template-columns: 1fr 1fr; }
+  .progress-table.hk .table-row { grid-template-columns: 1fr 1fr; }
   .progress-table .table-row > .name-cell { grid-column: 1 / -1; }
   .progress-table .table-row > .remove-row { justify-self: start; }
 }

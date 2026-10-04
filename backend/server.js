@@ -106,58 +106,49 @@ if (!state.users || state.users.length === 0) {
     : `Seeded default manager: manager@bahari.local / ${seedPassword}`);
 }
 
-// HK Goals Tracker, seeded from the department's tracker workbook. Managers edit it on the Goals page.
+// HK Goals Tracker. Managers keep the roster names and SMART targets; every score is calculated from supervisor reports.
+const HK_ROSTER = ['Agness Ramadan', 'Abdallah Hassan', 'Amina Abdalla', 'Amina Said', 'Feisal Abdalla', 'Chrisitna Andrea', 'Clementina Mwapopo',
+  'Diana Ndanshau', 'Dora Godson', 'Elizabeth Antony', 'Elizabeth Petro', 'Sara Mbise', 'Khairat Juma', 'Hajrat Michael', 'Hapsa Omar', 'Hilda Daniel',
+  'Madua Hassan', 'Mariam Khalifan', 'Matilder Richard', 'Anifa', 'Mulfida', 'Mwajuma Seif', 'Mwanaide Ally', 'Nachia Abdallah', 'Nahla Mohammed',
+  'Najma Khamis', 'Pili Omar', 'khadija', 'Salome Festo', 'Shamimu Hassan', 'Sharifa Sharif', 'Sophia Amos', 'Teresia Kassim', 'Nehema', 'Yasinta Alfred',
+  'Zawadi', 'Dorice Edward', 'Maryam Mohammed', 'Zuwena Ally', 'Christina'];
 if (!state.goals.length) {
   const goals = {
     id: 'current',
-    year: 2026,
     smartGoals: [
-      { key: 'cleaning_level', label: 'Cleaning Level', target: 98, rate: 144 },
-      { key: 'hygiene_standard', label: 'Hygiene Standard', target: 0, rate: 26 },
-      { key: 'organization_supplies', label: 'Organization Supplies', target: 0, rate: 20 },
-      { key: 'guest_interaction', label: 'Enhance Guest Interaction', target: 0, rate: 40 }
+      { key: 'cleaning_level', label: 'Cleaning Level', target: 98 },
+      { key: 'hygiene_standard', label: 'Hygiene Standard', target: 0 },
+      { key: 'organization_supplies', label: 'Organization Supplies', target: 0 },
+      { key: 'guest_interaction', label: 'Enhance Guest Interaction', target: 0 }
     ],
-    // HK scores are 1-10 per area; 0 or missing = not yet rated.
-    hkProgress: [
-      { name: 'Agness Ramadan' }, { name: 'Abdallah Hassan' }, { name: 'Amina Abdalla' }, { name: 'Amina Said' },
-      { name: 'Feisal Abdalla' }, { name: 'Chrisitna Andrea' }, { name: 'Clementina Mwapopo' }, { name: 'Diana Ndanshau' },
-      { name: 'Dora Godson', cleaning: 10 }, { name: 'Elizabeth Antony' }, { name: 'Elizabeth Petro' }, { name: 'Sara Mbise' },
-      { name: 'Khairat Juma', cleaning: 8 }, { name: 'Hajrat Michael' }, { name: 'Hapsa Omar' }, { name: 'Hilda Daniel' },
-      { name: 'Madua Hassan' }, { name: 'Mariam Khalifan' }, { name: 'Matilder Richard' }, { name: 'Anifa' },
-      { name: 'Mulfida' }, { name: 'Mwajuma Seif' }, { name: 'Mwanaide Ally' }, { name: 'Nachia Abdallah' },
-      { name: 'Nahla Mohammed' }, { name: 'Najma Khamis' }, { name: 'Pili Omar' }, { name: 'khadija' },
-      { name: 'Salome Festo' }, { name: 'Shamimu Hassan' }, { name: 'Sharifa Sharif', cleaning: 9 }, { name: 'Sophia Amos' },
-      { name: 'Teresia Kassim' }, { name: 'Nehema' }, { name: 'Yasinta Alfred', cleaning: 8 }, { name: 'Zawadi' },
-      { name: 'Dorice Edward' }, { name: 'Maryam Mohammed' }, { name: 'Zuwena Ally' }, { name: 'Christina' }
-    ],
-    // Public Area numbers are tally counts, not 1-10 scores.
-    paProgress: [
-      { name: 'Abdallah Mberwa', cleaning: 34, hygiene: 7, farewellLounge: 7 },
-      { name: 'Abubakar Jaala', cleaning: 33, hygiene: 16, guestInteraction: 11 },
-      { name: 'Amir Seif', cleaning: 21, hygiene: 12, farewellLounge: 15, weakness: 'FL drainage, shelf. Library shelf, soap dispenser, hair dryer' },
-      { name: 'Adil', cleaning: 18 },
-      { name: 'Hussein Hatibu', cleaning: 22, guestInteraction: 8, weakness: 'soap dispense, wall tiles, door handle' },
-      { name: 'Innocent', cleaning: 27, guestInteraction: 7 },
-      { name: 'Isaya Peter', cleaning: 29 },
-      { name: 'Nurudinin Yussuf', cleaning: 23, hygiene: 6, farewellLounge: 7, weakness: 'FL drainage, shelf.' },
-      { name: 'Suleiman Amer', cleaning: 16, guestInteraction: 3, weakness: 'needs to study english' },
-      { name: 'Twa Hamid', cleaning: 18, hygiene: 9, guestInteraction: 4, weakness: 'english need practice' },
-      { name: 'Yahya Juma', cleaning: 32, hygiene: 6, farewellLounge: 8, weakness: 'shelf, door handle' },
-      { name: 'Yussuf Amour', cleaning: 8, hygiene: 9 }
-    ]
+    hkProgress: HK_ROSTER.map((name) => ({ name }))
   };
   state.goals.push(goals);
   saveRow('goals', goals);
+} else {
+  // Older rows stored typed-in scores, a Public Area table and SMART rates; keep only names and targets.
+  const goals = state.goals.find((entry) => entry.id === 'current');
+  if (goals && (goals.paProgress || 'year' in goals || goals.hkProgress.some((row) => Object.keys(row).length > 1) || goals.smartGoals.some((row) => 'rate' in row))) {
+    delete goals.paProgress;
+    delete goals.year;
+    goals.hkProgress = goals.hkProgress.map((row) => ({ name: row.name }));
+    goals.smartGoals = goals.smartGoals.map(({ key, label, target }) => ({ key, label, target: Number(target) || 0 }));
+    saveRow('goals', goals);
+    console.log('Goals: switched to scores calculated from reports (removed typed-in scores and the Public Area table).');
+  }
 }
 
-const POINTS_TARGETS = { supervisor: 500, hk: 150, deadline: '2027-09-30' };
+// Goals count reports from this financial year only, so the point targets reset each year.
+const GOAL_PERIOD = { start: '2026-10-01', end: '2027-09-30' };
+const POINTS_TARGETS = { supervisor: 500, hk: 150, deadline: GOAL_PERIOD.end, periodStart: GOAL_PERIOD.start };
+const inGoalPeriod = (report) => !report.voided && String(report.date) >= GOAL_PERIOD.start && String(report.date) <= GOAL_PERIOD.end;
 const HK_POINT_TYPES = ['quality', 'neglected', 'trolley_pantry'];
 const sum = (values) => values.reduce((total, value) => total + value, 0);
 const nameKey = (name) => String(name || '').trim().toLowerCase();
 
 // Supervisor points: every room total (out of 50) from Inspection Rate Program reports about them, plus a cumulative history.
 function supervisorPoints() {
-  const reports = state.reports.filter((report) => report.type === 'inspection_rate' && !report.voided)
+  const reports = state.reports.filter((report) => report.type === 'inspection_rate' && inGoalPeriod(report))
     .sort((a, b) => String(a.date).localeCompare(String(b.date)));
   return state.users.filter((user) => user.role === 'supervisor' && user.active !== false).map((supervisor) => {
     let points = 0;
@@ -175,7 +166,7 @@ function supervisorPoints() {
 function hkPoints(roster) {
   const totals = new Map();
   for (const report of state.reports) {
-    if (report.voided || !HK_POINT_TYPES.includes(report.type)) continue;
+    if (!inGoalPeriod(report) || !HK_POINT_TYPES.includes(report.type)) continue;
     for (const entry of scoredEntries(report)) {
       const values = scoreValues(entry);
       if (!entry.hkName || !values.length) continue;
@@ -196,18 +187,79 @@ function hkPoints(roster) {
   return [...rows, ...unmatched];
 }
 
-function goalsResponse() {
-  const goals = state.goals.find((entry) => entry.id === 'current');
-  return { ...goals, targets: POINTS_TARGETS, supervisorPoints: supervisorPoints(), hkPoints: hkPoints(goals.hkProgress) };
+// Housekeeping progress columns, each an average of 1-10 scores from supervisor reports:
+// cleaning = Quality room average + Neglected "Cleaning"; hygiene = Quality bathroom items + Neglected "Hygiene";
+// guestInteraction / cleaningTime = the per-housekeeper boxes on the Quality Checklist; trolleyPantry = Trolley / Pantry lines.
+const BATHROOM_ITEMS = ['Shower', 'Toilet / WC', 'Counter / sink', 'Towel holder', 'Mirror / glass'];
+const HK_REVIEW_ITEMS = ['Guest interaction', 'Cleaning time'];
+const PROGRESS_COLUMNS = ['cleaning', 'hygiene', 'guestInteraction', 'cleaningTime', 'trolleyPantry'];
+const SMART_SOURCES = { cleaning_level: 'cleaning', hygiene_standard: 'hygiene', organization_supplies: 'trolleyPantry', guest_interaction: 'guestInteraction' };
+const average = (values) => (values.length ? sum(values) / values.length : null);
+const round1 = (value) => (value === null ? null : Number(value.toFixed(1)));
+function itemScore(entry, key) {
+  const value = entry.scores?.[key];
+  if (value === '' || value === null || value === undefined) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+const itemScores = (entry, keys) => keys.map((key) => itemScore(entry, key)).filter((value) => value !== null);
+
+function progressValues(report, entry) {
+  if (report.type === 'quality') {
+    const roomItems = Object.keys(entry.scores || {}).filter((key) => !HK_REVIEW_ITEMS.includes(key));
+    return { cleaning: average(itemScores(entry, roomItems)), hygiene: average(itemScores(entry, BATHROOM_ITEMS)), guestInteraction: itemScore(entry, 'Guest interaction'), cleaningTime: itemScore(entry, 'Cleaning time') };
+  }
+  if (report.type === 'neglected') return { cleaning: itemScore(entry, 'Cleaning'), hygiene: itemScore(entry, 'Hygiene') };
+  if (report.type === 'trolley_pantry') return { trolleyPantry: average(scoreValues(entry)) };
+  return {};
 }
 
-const clampScore = (value) => Math.min(10, Math.max(0, Math.round(Number(value) || 0)));
-const tally = (value) => Math.max(0, Math.round(Number(value) || 0));
+// Collects every column value this financial year, per housekeeper (by name) and for the whole team.
+function progressTotals() {
+  const people = new Map();
+  const team = Object.fromEntries(PROGRESS_COLUMNS.map((column) => [column, []]));
+  for (const report of state.reports) {
+    if (!HK_POINT_TYPES.includes(report.type) || !inGoalPeriod(report)) continue;
+    for (const entry of scoredEntries(report)) {
+      for (const [column, value] of Object.entries(progressValues(report, entry))) {
+        if (value === null || value === undefined) continue;
+        team[column].push(value);
+        if (!entry.hkName) continue;
+        const person = people.get(nameKey(entry.hkName)) || {};
+        (person[column] ||= []).push(value);
+        people.set(nameKey(entry.hkName), person);
+      }
+    }
+  }
+  return { people, team };
+}
+
+function goalsResponse() {
+  const goals = state.goals.find((entry) => entry.id === 'current');
+  const { people, team } = progressTotals();
+  const hkProgress = goals.hkProgress.map(({ name }) => {
+    const person = people.get(nameKey(name)) || {};
+    return { name, scores: Object.fromEntries(PROGRESS_COLUMNS.map((column) => [column, round1(average(person[column] || []))])), counts: Object.fromEntries(PROGRESS_COLUMNS.map((column) => [column, (person[column] || []).length])) };
+  });
+  // SMART rate = the team's average score in that area, as a percentage (8.6/10 -> 86%).
+  const smartGoals = goals.smartGoals.map((goal) => {
+    const values = team[SMART_SOURCES[goal.key]] || [];
+    return { ...goal, rate: values.length ? Math.round(average(values) * 10) : 0, samples: values.length };
+  });
+  return {
+    id: goals.id, updatedAt: goals.updatedAt, updatedBy: goals.updatedBy,
+    year: `${GOAL_PERIOD.start.slice(0, 4)}/${GOAL_PERIOD.end.slice(2, 4)}`,
+    targets: POINTS_TARGETS, smartGoals, hkProgress,
+    supervisorPoints: supervisorPoints(), hkPoints: hkPoints(goals.hkProgress)
+  };
+}
+
+const percent = (value) => Math.min(100, Math.max(0, Math.round(Number(value) || 0)));
 const cleanName = (value) => String(value || '').trim().slice(0, 80);
+// Only what managers may set: SMART targets (only for goals that already exist) and roster names.
 const GOALS_SHAPE = {
-  smartGoals: (rows) => rows.filter((row) => row && row.key).map((row) => ({ key: String(row.key).slice(0, 60), label: cleanName(row.label) || String(row.key), target: tally(row.target), rate: tally(row.rate) })),
-  hkProgress: (rows) => rows.filter((row) => cleanName(row?.name)).map((row) => ({ name: cleanName(row.name), ...Object.fromEntries(['cleaning', 'hygiene', 'guestInteraction', 'cleaningTime', 'trolleyPantry'].map((key) => [key, clampScore(row[key])])) })),
-  paProgress: (rows) => rows.filter((row) => cleanName(row?.name)).map((row) => ({ name: cleanName(row.name), ...Object.fromEntries(['cleaning', 'hygiene', 'guestInteraction', 'farewellLounge'].map((key) => [key, tally(row[key])])), weakness: String(row.weakness || '').slice(0, 300) }))
+  smartGoals: (rows, goals) => goals.smartGoals.map((goal) => ({ ...goal, target: percent(rows.find((row) => row?.key === goal.key)?.target ?? goal.target) })),
+  hkProgress: (rows) => rows.map((row) => ({ name: cleanName(row.name) }))
 };
 
 const server = app.listen(process.env.PORT || 5000, () => {
@@ -642,7 +694,7 @@ app.get('/api/goals', authMiddleware, requireManager, (req, res) => {
   return res.json({ goals: goalsResponse() });
 });
 
-// Replaces only the manager-entered sections that are posted; points are always computed, never stored.
+// Saves SMART targets and roster names only; every score is calculated on read.
 app.put('/api/goals', authMiddleware, requireManager, (req, res) => {
   const goals = state.goals.find((entry) => entry.id === 'current');
   for (const [section, clean] of Object.entries(GOALS_SHAPE)) {
@@ -654,7 +706,7 @@ app.put('/api/goals', authMiddleware, requireManager, (req, res) => {
       const repeated = names.find((name, index) => names.findIndex((other) => nameKey(other) === nameKey(name)) !== index);
       if (repeated) return res.status(400).json({ message: `"${repeated}" is listed twice.` });
     }
-    goals[section] = clean(req.body[section]);
+    goals[section] = clean(req.body[section], goals);
   }
   goals.updatedAt = new Date().toISOString();
   goals.updatedBy = req.currentUser.name;
