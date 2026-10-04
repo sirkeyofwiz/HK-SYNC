@@ -32,6 +32,7 @@ database.exec(`
   CREATE TABLE IF NOT EXISTS reports (id TEXT PRIMARY KEY, data TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, data TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS goals (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS attachments (id TEXT PRIMARY KEY, data TEXT NOT NULL);
 `);
 const app = express();
 const allowedOrigins = [...new Set([
@@ -46,7 +47,7 @@ app.use(express.json({ limit: '10mb' }));
 // Railway and Render sit one proxy in front of the app; without this every request's IP is the proxy's.
 app.set('trust proxy', 1);
 
-const DEFAULT_STATE = { users: [], messages: [], reports: [], tasks: [], goals: [] };
+const DEFAULT_STATE = { users: [], messages: [], reports: [], tasks: [], goals: [], attachments: [] };
 if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
   throw new Error('JWT_SECRET must be configured in production.');
 }
@@ -61,12 +62,12 @@ const roleReportTypes = {
 };
 
 function readState() {
-  const tableCounts = ['users', 'messages', 'reports', 'tasks', 'goals'].map((table) => database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count);
+  const tableCounts = ['users', 'messages', 'reports', 'tasks', 'goals', 'attachments'].map((table) => database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count);
   if (tableCounts.every((count) => count === 0) && fs.existsSync(dataFilePath)) {
     const legacyState = JSON.parse(fs.readFileSync(dataFilePath, 'utf8'));
     const importState = database.transaction(() => {
       for (const [table, rows] of Object.entries(legacyState)) {
-        if (!['users', 'messages', 'reports', 'tasks', 'goals'].includes(table) || !Array.isArray(rows)) continue;
+        if (!['users', 'messages', 'reports', 'tasks', 'goals', 'attachments'].includes(table) || !Array.isArray(rows)) continue;
         const insert = database.prepare(`INSERT OR REPLACE INTO ${table} (id, data) VALUES (?, ?)`);
         rows.forEach((row) => insert.run(row.id, JSON.stringify(row)));
       }
@@ -74,16 +75,21 @@ function readState() {
     importState();
   }
   const load = (table) => database.prepare(`SELECT data FROM ${table}`).all().map((row) => JSON.parse(row.data));
-  return { users: load('users'), messages: load('messages'), reports: load('reports'), tasks: load('tasks'), goals: load('goals') };
+  return { users: load('users'), messages: load('messages'), reports: load('reports'), tasks: load('tasks'), goals: load('goals'), attachments: load('attachments') };
 }
 
 let state = readState();
 
-const upsertStatements = Object.fromEntries(['users', 'messages', 'reports', 'tasks', 'goals'].map((table) => [table, database.prepare(`INSERT OR REPLACE INTO ${table} (id, data) VALUES (?, ?)`)]));
+const upsertStatements = Object.fromEntries(['users', 'messages', 'reports', 'tasks', 'goals', 'attachments'].map((table) => [table, database.prepare(`INSERT OR REPLACE INTO ${table} (id, data) VALUES (?, ?)`)]));
 
 // Persist only the row that changed; rewriting whole tables on every update gets slow as reports and photos accumulate.
 function saveRow(table, row) {
   upsertStatements[table].run(row.id, JSON.stringify(row));
+}
+
+const deleteStatements = Object.fromEntries(['messages', 'attachments'].map((table) => [table, database.prepare(`DELETE FROM ${table} WHERE id = ?`)]));
+function deleteRow(table, id) {
+  deleteStatements[table].run(id);
 }
 
 if (!state.users || state.users.length === 0) {
@@ -459,14 +465,33 @@ function withoutPhotos(data) {
   return { ...data, entries: strip(data.entries), trolleys: strip(data.trolleys), pantries: strip(data.pantries) };
 }
 
+function attachmentView(id) {
+  const attachment = state.attachments.find((entry) => entry.id === id);
+  return attachment ? { id: attachment.id, name: attachment.name, type: attachment.type, size: attachment.size, kind: attachment.kind, duration: attachment.duration || null } : null;
+}
+
 function buildMessageEntry(message) {
+  const deleted = Boolean(message.deletedAt);
+  const replied = message.replyTo ? state.messages.find((entry) => entry.id === message.replyTo) : null;
   return {
     id: message.id,
     senderId: message.senderId,
     receiverId: message.receiverId,
-    text: message.text,
+    text: deleted ? '' : message.text,
     createdAt: message.createdAt,
-    read: Boolean(message.read)
+    read: Boolean(message.read),
+    editedAt: message.editedAt || null,
+    deleted,
+    attachments: deleted ? [] : (message.attachments || []).map(attachmentView).filter(Boolean),
+    forwardedFrom: deleted ? null : message.forwardedFrom || null,
+    replyTo: !deleted && replied ? {
+      id: replied.id,
+      senderId: replied.senderId,
+      deleted: Boolean(replied.deletedAt),
+      text: replied.deletedAt ? '' : String(replied.text || '').slice(0, 160),
+      attachmentKind: !replied.deletedAt && replied.attachments?.length ? attachmentView(replied.attachments[0])?.kind || null : null
+    } : null,
+    reactions: deleted ? {} : message.reactions || {}
   };
 }
 
@@ -929,6 +954,98 @@ app.patch('/api/tasks/:id/status', authMiddleware, (req, res) => {
   return res.json({ task });
 });
 
+// ---------- Chat attachments ----------
+// Files live on the data volume; only the uploader and the people in a conversation that contains the file can open it.
+const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const ATTACHMENT_KINDS = {
+  'image/jpeg': 'image', 'image/png': 'image', 'image/webp': 'image', 'image/gif': 'image',
+  'application/pdf': 'file', 'application/msword': 'file', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'file',
+  'application/vnd.ms-excel': 'file', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'file', 'text/plain': 'file', 'text/csv': 'file',
+  'audio/webm': 'voice', 'audio/ogg': 'voice', 'audio/mp4': 'voice', 'audio/mpeg': 'voice', 'audio/aac': 'voice'
+};
+const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+const uploadPath = (id) => path.join(UPLOAD_DIR, id);
+const inMessage = (message, userId) => message.senderId === userId || message.receiverId === userId;
+const messagesUsing = (attachmentId) => state.messages.filter((message) => !message.deletedAt && message.attachments?.includes(attachmentId));
+
+function canOpenAttachment(attachment, userId) {
+  return attachment.ownerId === userId || messagesUsing(attachment.id).some((message) => inMessage(message, userId));
+}
+
+function removeAttachment(attachment) {
+  fs.rmSync(uploadPath(attachment.id), { force: true });
+  state.attachments = state.attachments.filter((entry) => entry.id !== attachment.id);
+  deleteRow('attachments', attachment.id);
+}
+
+// Uploads that were never sent are removed after a day.
+function removeAbandonedUploads() {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  for (const attachment of [...state.attachments]) {
+    if (new Date(attachment.createdAt).getTime() < cutoff && !messagesUsing(attachment.id).length) removeAttachment(attachment);
+  }
+}
+removeAbandonedUploads();
+setInterval(removeAbandonedUploads, 6 * 60 * 60 * 1000).unref();
+
+app.post('/api/attachments', authMiddleware, express.raw({ type: () => true, limit: MAX_UPLOAD_BYTES }), (req, res) => {
+  const type = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+  const kind = ATTACHMENT_KINDS[type];
+  if (!kind) return res.status(400).json({ message: 'Only photos, PDF, Word, Excel, text files and voice notes can be attached.' });
+  if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ message: 'The file is empty.' });
+  const rawName = (() => { try { return decodeURIComponent(String(req.headers['x-file-name'] || '')); } catch { return ''; } })();
+  const attachment = {
+    id: randomUUID(),
+    ownerId: req.user.id,
+    name: rawName.replace(/[\\/\r\n"]/g, '_').slice(0, 120) || (kind === 'voice' ? 'Voice message' : 'Attachment'),
+    type,
+    size: req.body.length,
+    kind,
+    duration: kind === 'voice' ? Math.min(600, Math.max(0, Math.round(Number(req.headers['x-duration']) || 0))) : null,
+    createdAt: new Date().toISOString()
+  };
+  fs.writeFileSync(uploadPath(attachment.id), req.body);
+  state.attachments.push(attachment);
+  saveRow('attachments', attachment);
+  return res.status(201).json({ attachment: attachmentView(attachment.id) });
+});
+
+app.get('/api/attachments/:id', authMiddleware, (req, res) => {
+  const attachment = state.attachments.find((entry) => entry.id === req.params.id);
+  if (!attachment || !canOpenAttachment(attachment, req.user.id) || !fs.existsSync(uploadPath(attachment.id))) {
+    return res.status(404).json({ message: 'Attachment not found.' });
+  }
+  res.set({
+    'Content-Type': attachment.type,
+    'X-Content-Type-Options': 'nosniff',
+    'Cache-Control': 'private, max-age=86400',
+    'Content-Disposition': `${attachment.kind === 'file' ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(attachment.name)}`
+  });
+  return res.sendFile(uploadPath(attachment.id));
+});
+
+function emitMessage(event, message) {
+  const payload = buildMessageEntry(message);
+  io.to(message.receiverId).emit(event, payload);
+  io.to(message.senderId).emit(event, payload);
+  return payload;
+}
+
+function ownMessage(req, res) {
+  const message = state.messages.find((entry) => entry.id === req.params.id);
+  if (!message || message.senderId !== req.user.id) {
+    res.status(404).json({ message: 'Message not found.' });
+    return null;
+  }
+  if (message.deletedAt) {
+    res.status(400).json({ message: 'This message was deleted.' });
+    return null;
+  }
+  return message;
+}
+
 // One summary per person you have messaged: last message and how many of theirs you haven't read.
 app.get('/api/messages', authMiddleware, (req, res) => {
   const summaries = new Map();
@@ -952,7 +1069,10 @@ app.post('/api/messages/:userId/read', authMiddleware, (req, res) => {
       updated += 1;
     }
   }
-  if (updated) io.to(req.user.id).emit('messages:read', { userId: req.params.userId });
+  if (updated) {
+    io.to(req.user.id).emit('messages:read', { userId: req.params.userId });
+    io.to(req.params.userId).emit('messages:seen', { by: req.user.id });
+  }
   return res.json({ updated });
 });
 
@@ -970,10 +1090,18 @@ app.get('/api/messages/:userId', authMiddleware, (req, res) => {
 });
 
 app.post('/api/messages', authMiddleware, (req, res) => {
-  const { receiverId, text } = req.body || {};
+  const { receiverId, text, replyTo } = req.body || {};
+  const attachmentIds = Array.isArray(req.body?.attachments) ? [...new Set(req.body.attachments)].slice(0, 10) : [];
 
-  if (!receiverId || !text || !String(text).trim()) {
-    return res.status(400).json({ message: 'Receiver and message text are required.' });
+  if (!receiverId || (!String(text || '').trim() && !attachmentIds.length)) {
+    return res.status(400).json({ message: 'Write a message or add an attachment.' });
+  }
+  if (attachmentIds.some((id) => state.attachments.find((entry) => entry.id === id)?.ownerId !== req.user.id)) {
+    return res.status(400).json({ message: 'One of the attachments could not be found. Try adding it again.' });
+  }
+  const repliedTo = replyTo ? state.messages.find((entry) => entry.id === replyTo) : null;
+  if (replyTo && (!repliedTo || !inMessage(repliedTo, req.user.id) || !inMessage(repliedTo, receiverId))) {
+    return res.status(400).json({ message: 'You can only reply to a message in this conversation.' });
   }
 
   const receiver = state.users.find((user) => user.id === receiverId);
@@ -983,7 +1111,7 @@ app.post('/api/messages', authMiddleware, (req, res) => {
   if (receiverId === req.user.id) {
     return res.status(400).json({ message: 'You cannot message yourself.' });
   }
-  if (String(text).trim().length > 2000) {
+  if (String(text || '').trim().length > 2000) {
     return res.status(400).json({ message: 'Messages can be at most 2000 characters.' });
   }
 
@@ -991,19 +1119,84 @@ app.post('/api/messages', authMiddleware, (req, res) => {
     id: randomUUID(),
     senderId: req.user.id,
     receiverId,
-    text: String(text).trim(),
+    text: String(text || '').trim(),
+    attachments: attachmentIds,
+    replyTo: repliedTo?.id || null,
+    reactions: {},
     createdAt: new Date().toISOString(),
     read: false
   };
 
   state.messages.push(message);
   saveRow('messages', message);
+  return res.status(201).json({ message: emitMessage('new-message', message) });
+});
 
-  const payload = buildMessageEntry(message);
-  io.to(receiverId).emit('new-message', payload);
-  io.to(req.user.id).emit('new-message', payload);
+// Forward to one or more colleagues; the copy credits the original author.
+app.post('/api/messages/forward', authMiddleware, (req, res) => {
+  const original = state.messages.find((entry) => entry.id === req.body?.messageId);
+  if (!original || original.deletedAt || !inMessage(original, req.user.id)) return res.status(404).json({ message: 'Message not found.' });
+  const receiverIds = Array.isArray(req.body?.receiverIds) ? [...new Set(req.body.receiverIds)].slice(0, 20) : [];
+  const receivers = receiverIds.map((id) => state.users.find((user) => user.id === id && user.active !== false && user.id !== req.user.id));
+  if (!receivers.length || receivers.some((user) => !user)) return res.status(400).json({ message: 'Choose who to forward it to.' });
+  const author = original.forwardedFrom || { senderId: original.senderId, name: state.users.find((user) => user.id === original.senderId)?.name || 'Unknown' };
+  const sent = receivers.map((receiver) => {
+    const message = { id: randomUUID(), senderId: req.user.id, receiverId: receiver.id, text: original.text, attachments: [...(original.attachments || [])], replyTo: null, forwardedFrom: author, reactions: {}, createdAt: new Date().toISOString(), read: false };
+    state.messages.push(message);
+    saveRow('messages', message);
+    return emitMessage('new-message', message);
+  });
+  return res.status(201).json({ messages: sent });
+});
 
-  return res.status(201).json({ message: payload });
+app.patch('/api/messages/:id', authMiddleware, (req, res) => {
+  const message = ownMessage(req, res);
+  if (!message) return undefined;
+  const text = String(req.body?.text || '').trim();
+  if (!text && !message.attachments?.length) return res.status(400).json({ message: 'A message cannot be empty.' });
+  if (text.length > 2000) return res.status(400).json({ message: 'Messages can be at most 2000 characters.' });
+  if (text !== message.text) {
+    message.text = text;
+    message.editedAt = new Date().toISOString();
+    saveRow('messages', message);
+  }
+  return res.json({ message: emitMessage('message-updated', message) });
+});
+
+// Deleting removes the message and its files for both people (files stay if a forwarded copy still uses them).
+app.delete('/api/messages/:id', authMiddleware, (req, res) => {
+  const message = ownMessage(req, res);
+  if (!message) return undefined;
+  const attachmentIds = message.attachments || [];
+  message.deletedAt = new Date().toISOString();
+  message.text = '';
+  message.attachments = [];
+  message.reactions = {};
+  delete message.forwardedFrom;
+  saveRow('messages', message);
+  for (const id of attachmentIds) {
+    const attachment = state.attachments.find((entry) => entry.id === id);
+    if (attachment && !messagesUsing(id).length) removeAttachment(attachment);
+  }
+  return res.json({ message: emitMessage('message-updated', message) });
+});
+
+// One reaction per person: choosing the same emoji again removes it.
+app.post('/api/messages/:id/reactions', authMiddleware, (req, res) => {
+  const message = state.messages.find((entry) => entry.id === req.params.id);
+  if (!message || message.deletedAt || !inMessage(message, req.user.id)) return res.status(404).json({ message: 'Message not found.' });
+  const emoji = req.body?.emoji;
+  if (!REACTIONS.includes(emoji)) return res.status(400).json({ message: 'Unknown reaction.' });
+  const reactions = message.reactions || {};
+  const had = reactions[emoji]?.includes(req.user.id);
+  for (const key of Object.keys(reactions)) {
+    reactions[key] = reactions[key].filter((id) => id !== req.user.id);
+    if (!reactions[key].length) delete reactions[key];
+  }
+  if (!had) reactions[emoji] = [...(reactions[emoji] || []), req.user.id];
+  message.reactions = reactions;
+  saveRow('messages', message);
+  return res.json({ message: emitMessage('message-updated', message) });
 });
 
 // Sockets must present a valid JWT (socket.io-client: `io(url, { auth: { token } })`); the user id always comes from the token, never from the client.
@@ -1028,6 +1221,11 @@ io.on('connection', (socket) => {
   if (sockets.size === 1) io.emit('presence:update', { userId, isOnline: true });
 
   socket.on('register-user', () => {});
+
+  // "typing…" is relayed only to an active colleague; nothing is stored.
+  socket.on('typing', (to) => {
+    if (typeof to === 'string' && to !== userId && state.users.some((user) => user.id === to && user.active !== false)) io.to(to).emit('typing', { from: userId });
+  });
 
   socket.on('disconnect', () => {
     const remaining = onlineUsers.get(userId);
