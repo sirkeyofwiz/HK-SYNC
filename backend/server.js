@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url';
 import { Server } from 'socket.io';
 import Database from 'better-sqlite3';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import webpush from 'web-push';
 
 dotenv.config();
 
@@ -33,6 +34,9 @@ database.exec(`
   CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, data TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS goals (id TEXT PRIMARY KEY, data TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS attachments (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS settings (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS subscriptions (id TEXT PRIMARY KEY, data TEXT NOT NULL);
 `);
 const app = express();
 const allowedOrigins = [...new Set([
@@ -47,7 +51,7 @@ app.use(express.json({ limit: '10mb' }));
 // Railway and Render sit one proxy in front of the app; without this every request's IP is the proxy's.
 app.set('trust proxy', 1);
 
-const DEFAULT_STATE = { users: [], messages: [], reports: [], tasks: [], goals: [], attachments: [] };
+const DEFAULT_STATE = { users: [], messages: [], reports: [], tasks: [], goals: [], attachments: [], settings: [], notifications: [], subscriptions: [] };
 if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
   throw new Error('JWT_SECRET must be configured in production.');
 }
@@ -62,12 +66,12 @@ const roleReportTypes = {
 };
 
 function readState() {
-  const tableCounts = ['users', 'messages', 'reports', 'tasks', 'goals', 'attachments'].map((table) => database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count);
+  const tableCounts = ['users', 'messages', 'reports', 'tasks', 'goals', 'attachments', 'settings', 'notifications', 'subscriptions'].map((table) => database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count);
   if (tableCounts.every((count) => count === 0) && fs.existsSync(dataFilePath)) {
     const legacyState = JSON.parse(fs.readFileSync(dataFilePath, 'utf8'));
     const importState = database.transaction(() => {
       for (const [table, rows] of Object.entries(legacyState)) {
-        if (!['users', 'messages', 'reports', 'tasks', 'goals', 'attachments'].includes(table) || !Array.isArray(rows)) continue;
+        if (!['users', 'messages', 'reports', 'tasks', 'goals', 'attachments', 'settings', 'notifications', 'subscriptions'].includes(table) || !Array.isArray(rows)) continue;
         const insert = database.prepare(`INSERT OR REPLACE INTO ${table} (id, data) VALUES (?, ?)`);
         rows.forEach((row) => insert.run(row.id, JSON.stringify(row)));
       }
@@ -75,19 +79,19 @@ function readState() {
     importState();
   }
   const load = (table) => database.prepare(`SELECT data FROM ${table}`).all().map((row) => JSON.parse(row.data));
-  return { users: load('users'), messages: load('messages'), reports: load('reports'), tasks: load('tasks'), goals: load('goals'), attachments: load('attachments') };
+  return { users: load('users'), messages: load('messages'), reports: load('reports'), tasks: load('tasks'), goals: load('goals'), attachments: load('attachments'), settings: load('settings'), notifications: load('notifications'), subscriptions: load('subscriptions') };
 }
 
 let state = readState();
 
-const upsertStatements = Object.fromEntries(['users', 'messages', 'reports', 'tasks', 'goals', 'attachments'].map((table) => [table, database.prepare(`INSERT OR REPLACE INTO ${table} (id, data) VALUES (?, ?)`)]));
+const upsertStatements = Object.fromEntries(['users', 'messages', 'reports', 'tasks', 'goals', 'attachments', 'settings', 'notifications', 'subscriptions'].map((table) => [table, database.prepare(`INSERT OR REPLACE INTO ${table} (id, data) VALUES (?, ?)`)]));
 
 // Persist only the row that changed; rewriting whole tables on every update gets slow as reports and photos accumulate.
 function saveRow(table, row) {
   upsertStatements[table].run(row.id, JSON.stringify(row));
 }
 
-const deleteStatements = Object.fromEntries(['messages', 'attachments'].map((table) => [table, database.prepare(`DELETE FROM ${table} WHERE id = ?`)]));
+const deleteStatements = Object.fromEntries(['messages', 'attachments', 'notifications', 'subscriptions'].map((table) => [table, database.prepare(`DELETE FROM ${table} WHERE id = ?`)]));
 function deleteRow(table, id) {
   deleteStatements[table].run(id);
 }
@@ -832,7 +836,18 @@ app.post('/api/reports', authMiddleware, (req, res) => {
   };
   state.reports.push(report);
   saveRow('reports', report);
-  return res.status(201).json({ report: { ...report, data: withoutPhotos(report.data), ...reportSummary(report) } });
+  const summary = reportSummary(report);
+  const label = REPORT_LABELS[report.type] || 'Report';
+  const place = data.area || data.block || data.vehicleId || '';
+  if (summary.flagged) {
+    for (const manager of state.users.filter((user) => isManagerRole(user) && user.active !== false)) {
+      notify(manager.id, { type: 'report_flagged', fromUserId: req.user.id, title: `Needs attention · ${label}`, body: `${submitter.name}${summary.flaggedCount ? ` · ${summary.flaggedCount} flagged` : ''}${place ? ` · ${place}` : ''}`, link: { page: 'report', id: report.id } });
+    }
+  }
+  if (report.type === 'inspection_rate' && data.supervisorId) {
+    notify(data.supervisorId, { type: 'inspected', fromUserId: req.user.id, title: 'You were inspected', body: `${submitter.name} · ${summary.itemCount} room${summary.itemCount === 1 ? '' : 's'}${place ? ` · ${place}` : ''} · average ${summary.average}/10`, link: { page: 'report', id: report.id } });
+  }
+  return res.status(201).json({ report: { ...report, data: withoutPhotos(report.data), ...summary } });
 });
 
 const profilePeriod = (req) => (req.query.period === 'all' ? 'all' : 'year');
@@ -917,10 +932,12 @@ app.put('/api/goals', authMiddleware, requireManager, (req, res) => {
 app.post('/api/reports/:id/sign', authMiddleware, requireManager, (req, res) => {
   const report = state.reports.find((entry) => entry.id === req.params.id);
   if (!report) return res.status(404).json({ message: 'Report not found.' });
+  const firstSignature = !report.hodSignedAt;
   report.hodSignature = req.currentUser.name;
   report.hodSignedAt = new Date().toISOString();
   report.updatedAt = new Date().toISOString();
   saveRow('reports', report);
+  if (firstSignature) notify(report.submittedBy, { type: 'report_signed', fromUserId: req.user.id, title: `${REPORT_LABELS[report.type] || 'Report'} signed off`, body: `by ${req.currentUser.name} · ${report.date}`, link: { page: 'report', id: report.id } });
   return res.json({ report: { ...report, data: withoutPhotos(report.data) } });
 });
 
@@ -945,6 +962,7 @@ app.post('/api/tasks', authMiddleware, requireManager, (req, res) => {
   const task = { id: randomUUID(), title, location, assignedTo: assignedTo || null, assignedBy: req.user.id, priority, dueDate: dueDate || null, status: 'pending', createdAt: new Date().toISOString() };
   state.tasks.push(task);
   saveRow('tasks', task);
+  if (task.assignedTo) notify(task.assignedTo, { type: 'task', fromUserId: req.user.id, urgent: task.priority === 'urgent', title: task.priority === 'urgent' ? 'New urgent task' : 'New task', body: `${task.title} · ${task.location}${task.dueDate ? ` · due ${task.dueDate}` : ''}`, link: { page: 'task', id: task.id } });
   return res.status(201).json({ task });
 });
 
@@ -959,10 +977,21 @@ app.patch('/api/tasks/:id/status', authMiddleware, (req, res) => {
   if (!isManager && task.assignedTo !== req.user.id) {
     return res.status(403).json({ message: 'Only the assigned staff member or a manager can update this task.' });
   }
+  const previous = task.status;
   task.status = status;
   task.updatedAt = new Date().toISOString();
   task.completedAt = status === 'completed' ? task.updatedAt : null;
   saveRow('tasks', task);
+  if (previous !== status) {
+    const actor = userName(req.user.id);
+    const link = { page: 'task', id: task.id };
+    // The assignee's progress goes to whoever created the task; a manager's change goes to the assignee.
+    if (req.user.id === task.assignedTo) {
+      notify(task.assignedBy, { type: 'task', fromUserId: req.user.id, title: `${actor} ${{ completed: 'completed', in_progress: 'started', pending: 'moved back to pending' }[status]}`, body: task.title, link });
+    } else if (task.assignedTo) {
+      notify(task.assignedTo, { type: 'task', fromUserId: req.user.id, title: previous === 'completed' ? 'Task reopened' : status === 'completed' ? 'Task marked completed' : status === 'in_progress' ? 'Task in progress' : 'Task moved back to pending', body: `${task.title} · by ${actor}`, link });
+    }
+  }
   return res.json({ task });
 });
 
@@ -1063,7 +1092,7 @@ function ownMessage(req, res) {
 const isManagerRole = (user) => ['manager', 'assistant_manager'].includes(user?.role);
 const sharedWith = (kind, id, userId) => state.messages.some((message) => !message.deletedAt && message.share?.kind === kind && message.share.id === id && inMessage(message, userId));
 function canSeeReport(user, report) {
-  return Boolean(user && report && !report.voided && (isManagerRole(user) || report.submittedBy === user.id || sharedWith('report', report.id, user.id)));
+  return Boolean(user && report && !report.voided && (isManagerRole(user) || report.submittedBy === user.id || report.data?.supervisorId === user.id || sharedWith('report', report.id, user.id)));
 }
 function canSeeTask(user, task) {
   return Boolean(user && task && (isManagerRole(user) || task.assignedTo === user.id || sharedWith('task', task.id, user.id)));
@@ -1130,6 +1159,180 @@ function discussionIndex(userId) {
   return index;
 }
 
+// ---------- Notifications ----------
+// Every alert is stored (for the 🔔 list) and pushed to the person's devices unless they have the app open on screen,
+// it's their quiet hours (urgent tasks still come through), or they turned that kind of alert off.
+const NOTIFY_CATEGORY = { message: 'messages', question: 'questions', task: 'tasks', report_signed: 'reportSigned', report_flagged: 'reportFlagged', inspected: 'inspected', reaction: 'reactions' };
+const DEFAULT_NOTIFY = {
+  categories: { messages: true, questions: true, tasks: true, reportSigned: true, reportFlagged: true, inspected: true, reactions: false },
+  quietHours: { enabled: true, start: '22:00', end: '06:00' },
+  preview: true,
+  sound: true
+};
+const APP_TIMEZONE = process.env.APP_TIMEZONE || 'Africa/Dar_es_Salaam';
+const REPORT_LABELS = { neglected: 'Neglected Area', quality: 'Quality Checklist', trolley_pantry: 'Trolley / Pantry', handover: 'Shift Handover', vehicle: 'Vehicle Checklist', tools: 'Tools Control', inspection_rate: 'Inspection Rate Program', guest_interaction: 'Guest Interaction Check' };
+const NOTIFICATION_DAYS = 60;
+
+function notifySettings(user) {
+  const saved = user?.notify || {};
+  return { ...DEFAULT_NOTIFY, ...saved, categories: { ...DEFAULT_NOTIFY.categories, ...(saved.categories || {}) }, quietHours: { ...DEFAULT_NOTIFY.quietHours, ...(saved.quietHours || {}) } };
+}
+
+// Push keys are made on first start and kept in the database (env vars override), so there's nothing to configure.
+function vapidKeys() {
+  if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) return { publicKey: process.env.VAPID_PUBLIC_KEY, privateKey: process.env.VAPID_PRIVATE_KEY };
+  let row = state.settings.find((entry) => entry.id === 'vapid');
+  if (!row) {
+    row = { id: 'vapid', ...webpush.generateVAPIDKeys(), createdAt: new Date().toISOString() };
+    state.settings.push(row);
+    saveRow('settings', row);
+  }
+  return { publicKey: row.publicKey, privateKey: row.privateKey };
+}
+const VAPID = vapidKeys();
+webpush.setVapidDetails(process.env.VAPID_SUBJECT || (APP_URL.startsWith('https://') ? APP_URL : 'mailto:hk-sync@example.com'), VAPID.publicKey, VAPID.privateKey);
+
+// The app tells the server whether it's on screen and which chat is open.
+const openSockets = (userId) => [...(onlineUsers.get(userId) || [])].map((id) => io.sockets.sockets.get(id)).filter(Boolean);
+const hasAppOnScreen = (userId) => openSockets(userId).some((socket) => socket.data.visible);
+const isReadingChat = (userId, otherId) => openSockets(userId).some((socket) => socket.data.visible && socket.data.chatWith === otherId);
+
+function inQuietHours(settings) {
+  if (!settings.quietHours.enabled) return false;
+  const now = new Intl.DateTimeFormat('en-GB', { timeZone: APP_TIMEZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
+  const { start, end } = settings.quietHours;
+  return start <= end ? now >= start && now < end : now >= start || now < end;
+}
+
+async function sendPush(userId, notification, onlyEndpoint = null) {
+  const payload = JSON.stringify({ id: notification.id, title: notification.title, body: notification.body, link: notification.link, tag: notification.link ? JSON.stringify(notification.link) : notification.id });
+  let delivered = 0;
+  for (const subscription of state.subscriptions.filter((entry) => entry.userId === userId && (!onlyEndpoint || entry.endpoint === onlyEndpoint))) {
+    try {
+      await webpush.sendNotification({ endpoint: subscription.endpoint, keys: subscription.keys }, payload, { TTL: 24 * 60 * 60, urgency: notification.urgent ? 'high' : 'normal' });
+      delivered += 1;
+    } catch (error) {
+      // 404/410 = the browser dropped this registration; forget it.
+      if ([404, 410].includes(error.statusCode)) {
+        state.subscriptions = state.subscriptions.filter((entry) => entry.id !== subscription.id);
+        deleteRow('subscriptions', subscription.id);
+      } else {
+        console.error('Push failed:', error.statusCode || error.message);
+      }
+    }
+  }
+  return delivered;
+}
+
+function notify(userId, { type, title, body = '', link = null, urgent = false, fromUserId = null }) {
+  const user = state.users.find((entry) => entry.id === userId && entry.active !== false);
+  if (!user || userId === fromUserId) return null;
+  const settings = notifySettings(user);
+  if (NOTIFY_CATEGORY[type] && settings.categories[NOTIFY_CATEGORY[type]] === false) return null;
+  // Nothing to tell someone who is reading that very conversation.
+  if ((type === 'message' || type === 'question') && fromUserId && isReadingChat(userId, fromUserId)) return null;
+  const notification = { id: randomUUID(), userId, type, title: String(title).slice(0, 120), body: String(body || '').slice(0, 240), link, urgent: Boolean(urgent), createdAt: new Date().toISOString(), readAt: null };
+  state.notifications.push(notification);
+  saveRow('notifications', notification);
+  io.to(userId).emit('notification', notification);
+  if (!hasAppOnScreen(userId) && !(inQuietHours(settings) && !urgent)) {
+    const hideText = !settings.preview && (type === 'message' || type === 'question');
+    sendPush(userId, hideText ? { ...notification, body: 'New message' } : notification).catch(() => {});
+  }
+  return notification;
+}
+
+function markNotificationsRead(userId, matches) {
+  const now = new Date().toISOString();
+  const ids = [];
+  for (const notification of state.notifications) {
+    if (notification.userId !== userId || notification.readAt || !matches(notification)) continue;
+    notification.readAt = now;
+    saveRow('notifications', notification);
+    ids.push(notification.id);
+  }
+  if (ids.length) io.to(userId).emit('notifications:read', { ids });
+  return ids.length;
+}
+
+function removeOldNotifications() {
+  const cutoff = Date.now() - NOTIFICATION_DAYS * 24 * 60 * 60 * 1000;
+  for (const notification of state.notifications.filter((entry) => new Date(entry.createdAt).getTime() < cutoff)) deleteRow('notifications', notification.id);
+  state.notifications = state.notifications.filter((entry) => new Date(entry.createdAt).getTime() >= cutoff);
+}
+removeOldNotifications();
+setInterval(removeOldNotifications, 24 * 60 * 60 * 1000).unref();
+
+const messageSummary = (message) => message.text || (message.share ? (message.share.kind === 'task' ? '✓ Task' : '📋 Report') : '') || ({ image: '📷 Photo', file: '📎 File', voice: '🎤 Voice message' }[attachmentView(message.attachments?.[0])?.kind] || 'New message');
+const userName = (id) => state.users.find((user) => user.id === id)?.name || 'Someone';
+function shareTitle(share) {
+  if (share.kind === 'task') return `task "${state.tasks.find((task) => task.id === share.id)?.title || ''}"`;
+  const report = state.reports.find((entry) => entry.id === share.id);
+  if (!report) return 'a report';
+  return `${report.submittedBy === share.receiverId ? 'your' : 'the'} ${REPORT_LABELS[report.type] || 'report'}`;
+}
+
+app.get('/api/notifications', authMiddleware, (req, res) => {
+  const mine = state.notifications.filter((entry) => entry.userId === req.user.id);
+  return res.json({ notifications: mine.slice(-50).reverse(), unread: mine.filter((entry) => !entry.readAt).length });
+});
+
+app.post('/api/notifications/read', authMiddleware, (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids : null;
+  const count = markNotificationsRead(req.user.id, (entry) => req.body?.all || ids?.includes(entry.id));
+  return res.json({ updated: count });
+});
+
+app.get('/api/push/key', authMiddleware, (req, res) => res.json({ publicKey: VAPID.publicKey }));
+
+app.post('/api/push/subscribe', authMiddleware, (req, res) => {
+  const subscription = req.body?.subscription;
+  const endpoint = String(subscription?.endpoint || '');
+  if (!endpoint.startsWith('https://') || !subscription?.keys?.p256dh || !subscription?.keys?.auth) return res.status(400).json({ message: 'This browser did not provide a valid push registration.' });
+  const id = createHash('sha256').update(endpoint).digest('hex');
+  // A shared device belongs to whoever registered it last.
+  const entry = { id, userId: req.user.id, endpoint, keys: { p256dh: String(subscription.keys.p256dh), auth: String(subscription.keys.auth) }, userAgent: String(req.headers['user-agent'] || '').slice(0, 200), createdAt: new Date().toISOString() };
+  state.subscriptions = [...state.subscriptions.filter((item) => item.id !== id), entry];
+  saveRow('subscriptions', entry);
+  return res.status(201).json({ ok: true, devices: state.subscriptions.filter((item) => item.userId === req.user.id).length });
+});
+
+app.post('/api/push/unsubscribe', authMiddleware, (req, res) => {
+  const id = createHash('sha256').update(String(req.body?.endpoint || '')).digest('hex');
+  const found = state.subscriptions.find((item) => item.id === id && item.userId === req.user.id);
+  if (found) {
+    state.subscriptions = state.subscriptions.filter((item) => item.id !== id);
+    deleteRow('subscriptions', id);
+  }
+  return res.json({ ok: true });
+});
+
+app.post('/api/push/test', authMiddleware, async (req, res) => {
+  const endpoint = req.body?.endpoint || null;
+  if (!state.subscriptions.some((item) => item.userId === req.user.id && (!endpoint || item.endpoint === endpoint))) return res.status(400).json({ message: 'Notifications are not turned on for this device yet.' });
+  const delivered = await sendPush(req.user.id, { id: randomUUID(), title: 'HK SYNC test notification', body: 'Notifications are working on this device. 🎉', link: { page: 'account' }, urgent: true }, endpoint);
+  return delivered ? res.json({ ok: true }) : res.status(502).json({ message: 'The notification could not be delivered. Try turning notifications off and on again.' });
+});
+
+app.get('/api/users/me/notify', authMiddleware, (req, res) => {
+  return res.json({ settings: notifySettings(currentUser(req)), devices: state.subscriptions.filter((item) => item.userId === req.user.id).length, timezone: APP_TIMEZONE });
+});
+
+app.put('/api/users/me/notify', authMiddleware, (req, res) => {
+  const user = currentUser(req);
+  const body = req.body || {};
+  const current = notifySettings(user);
+  const time = (value, fallback) => (/^([01]\d|2[0-3]):[0-5]\d$/.test(String(value)) ? String(value) : fallback);
+  user.notify = {
+    categories: Object.fromEntries(Object.keys(DEFAULT_NOTIFY.categories).map((key) => [key, typeof body.categories?.[key] === 'boolean' ? body.categories[key] : current.categories[key]])),
+    quietHours: { enabled: typeof body.quietHours?.enabled === 'boolean' ? body.quietHours.enabled : current.quietHours.enabled, start: time(body.quietHours?.start, current.quietHours.start), end: time(body.quietHours?.end, current.quietHours.end) },
+    preview: typeof body.preview === 'boolean' ? body.preview : current.preview,
+    sound: typeof body.sound === 'boolean' ? body.sound : current.sound
+  };
+  saveRow('users', user);
+  return res.json({ settings: notifySettings(user) });
+});
+
 // One summary per person you have messaged: last message and how many of theirs you haven't read.
 app.get('/api/messages', authMiddleware, (req, res) => {
   const summaries = new Map();
@@ -1153,6 +1356,7 @@ app.post('/api/messages/:userId/read', authMiddleware, (req, res) => {
       updated += 1;
     }
   }
+  markNotificationsRead(req.user.id, (entry) => entry.link?.page === 'messages' && entry.link.userId === req.params.userId);
   if (updated) {
     io.to(req.user.id).emit('messages:read', { userId: req.params.userId });
     io.to(req.params.userId).emit('messages:seen', { by: req.user.id });
@@ -1234,6 +1438,10 @@ app.post('/api/messages', authMiddleware, (req, res) => {
 
   state.messages.push(message);
   saveRow('messages', message);
+  const sender = userName(req.user.id);
+  notify(receiverId, cleanShare
+    ? { type: 'question', fromUserId: req.user.id, title: `${sender} · question about ${shareTitle({ ...cleanShare, receiverId })}`, body: message.text || 'Tap to see what it is about.', link: { page: 'messages', userId: req.user.id } }
+    : { type: 'message', fromUserId: req.user.id, title: sender, body: messageSummary(message), link: { page: 'messages', userId: req.user.id } });
   return res.status(201).json({ message: emitMessage('new-message', message) });
 });
 
@@ -1249,6 +1457,7 @@ app.post('/api/messages/forward', authMiddleware, (req, res) => {
     const message = { id: randomUUID(), senderId: req.user.id, receiverId: receiver.id, text: original.text, attachments: [...(original.attachments || [])], share: original.share || null, replyTo: null, forwardedFrom: author, reactions: {}, createdAt: new Date().toISOString(), read: false };
     state.messages.push(message);
     saveRow('messages', message);
+    notify(receiver.id, { type: 'message', fromUserId: req.user.id, title: userName(req.user.id), body: `Forwarded: ${messageSummary(message)}`, link: { page: 'messages', userId: req.user.id } });
     return emitMessage('new-message', message);
   });
   return res.status(201).json({ messages: sent });
@@ -1301,6 +1510,7 @@ app.post('/api/messages/:id/reactions', authMiddleware, (req, res) => {
   if (!had) reactions[emoji] = [...(reactions[emoji] || []), req.user.id];
   message.reactions = reactions;
   saveRow('messages', message);
+  if (!had) notify(message.senderId, { type: 'reaction', fromUserId: req.user.id, title: `${userName(req.user.id)} reacted ${emoji}`, body: messageSummary(message), link: { page: 'messages', userId: req.user.id } });
   return res.json({ message: emitMessage('message-updated', message) });
 });
 
@@ -1326,6 +1536,13 @@ io.on('connection', (socket) => {
   if (sockets.size === 1) io.emit('presence:update', { userId, isOnline: true });
 
   socket.on('register-user', () => {});
+
+  socket.data.visible = false;
+  socket.data.chatWith = null;
+  socket.on('client-state', (clientState) => {
+    socket.data.visible = Boolean(clientState?.visible);
+    socket.data.chatWith = typeof clientState?.chatWith === 'string' ? clientState.chatWith : null;
+  });
 
   // "typing…" is relayed only to an active colleague; nothing is stored.
   socket.on('typing', (to) => {

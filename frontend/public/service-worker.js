@@ -1,4 +1,4 @@
-const CACHE_NAME = 'hk-sync-shell-v3';
+const CACHE_NAME = 'hk-sync-shell-v4';
 const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/logo-mark.webp'];
 
 self.addEventListener('install', (event) => {
@@ -33,4 +33,38 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(fetch(event.request)
     .then((response) => cacheCopy(event.request, response))
     .catch(() => caches.match(event.request).then((cached) => cached || (event.request.mode === 'navigate' ? caches.match('/index.html') : Response.error()))));
+});
+
+// Phone / desktop notifications sent by the server (web push).
+self.addEventListener('push', (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = { body: event.data ? event.data.text() : '' };
+  }
+  event.waitUntil(self.registration.showNotification(data.title || 'HK SYNC', {
+    body: data.body || '',
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
+    tag: data.tag || data.id,
+    renotify: true,
+    data: { link: data.link || null }
+  }));
+});
+
+// Tapping a notification focuses HK SYNC (or opens it) on the right chat, task or report.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const link = event.notification.data?.link || null;
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const open = windows.find((client) => new URL(client.url).origin === self.location.origin);
+    if (open) {
+      await open.focus();
+      open.postMessage({ type: 'open-link', link });
+      return;
+    }
+    await self.clients.openWindow(link ? `/?open=${encodeURIComponent(JSON.stringify(link))}` : '/');
+  })());
 });
