@@ -53,11 +53,11 @@ if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
 const JWT_SECRET = process.env.JWT_SECRET || 'local-development-secret';
 const onlineUsers = new Map(); // userId -> Set of socket ids
 const roleReportTypes = {
-  supervisor: ['neglected', 'quality', 'trolley_pantry', 'handover'],
+  supervisor: ['neglected', 'quality', 'trolley_pantry', 'handover', 'guest_interaction'],
   storekeeper: ['tools'],
   driver: ['vehicle'],
-  manager: ['neglected', 'quality', 'trolley_pantry', 'handover', 'vehicle', 'tools', 'inspection_rate'],
-  assistant_manager: ['neglected', 'quality', 'trolley_pantry', 'handover', 'vehicle', 'tools', 'inspection_rate']
+  manager: ['neglected', 'quality', 'trolley_pantry', 'handover', 'vehicle', 'tools', 'inspection_rate', 'guest_interaction'],
+  assistant_manager: ['neglected', 'quality', 'trolley_pantry', 'handover', 'vehicle', 'tools', 'inspection_rate', 'guest_interaction']
 };
 
 function readState() {
@@ -189,11 +189,15 @@ function hkPoints(roster) {
 
 // Housekeeping progress columns, each an average of 1-10 scores from supervisor reports:
 // cleaning = Quality room average + Neglected "Cleaning"; hygiene = Quality bathroom items + Neglected "Hygiene";
-// guestInteraction / cleaningTime = the per-housekeeper boxes on the Quality Checklist; trolleyPantry = Trolley / Pantry lines.
+// guestInteraction = latest Guest Interaction Check (average of its three criteria); cleaningTime = the Quality Checklist box;
+// trolleyPantry = Trolley / Pantry lines.
 const BATHROOM_ITEMS = ['Shower', 'Toilet / WC', 'Counter / sink', 'Towel holder', 'Mirror / glass'];
 const HK_REVIEW_ITEMS = ['Guest interaction', 'Cleaning time'];
 const PROGRESS_COLUMNS = ['cleaning', 'hygiene', 'guestInteraction', 'cleaningTime', 'trolleyPantry'];
-const SMART_SOURCES = { cleaning_level: 'cleaning', hygiene_standard: 'hygiene', organization_supplies: 'trolleyPantry', guest_interaction: 'guestInteraction' };
+const SMART_SOURCES = { cleaning_level: 'cleaning', hygiene_standard: 'hygiene', organization_supplies: 'trolleyPantry' };
+const INTERACTION_ITEMS = ['English level', 'Guest approaching', 'Introduction'];
+// "Guest-ready" for the SMART goal: the latest check scores 8+ on all three criteria.
+const GUEST_READY = 8;
 const average = (values) => (values.length ? sum(values) / values.length : null);
 const round1 = (value) => (value === null ? null : Number(value.toFixed(1)));
 function itemScore(entry, key) {
@@ -207,7 +211,7 @@ const itemScores = (entry, keys) => keys.map((key) => itemScore(entry, key)).fil
 function progressValues(report, entry) {
   if (report.type === 'quality') {
     const roomItems = Object.keys(entry.scores || {}).filter((key) => !HK_REVIEW_ITEMS.includes(key));
-    return { cleaning: average(itemScores(entry, roomItems)), hygiene: average(itemScores(entry, BATHROOM_ITEMS)), guestInteraction: itemScore(entry, 'Guest interaction'), cleaningTime: itemScore(entry, 'Cleaning time') };
+    return { cleaning: average(itemScores(entry, roomItems)), hygiene: average(itemScores(entry, BATHROOM_ITEMS)), cleaningTime: itemScore(entry, 'Cleaning time') };
   }
   if (report.type === 'neglected') return { cleaning: itemScore(entry, 'Cleaning'), hygiene: itemScore(entry, 'Hygiene') };
   if (report.type === 'trolley_pantry') return { trolleyPantry: average(scoreValues(entry)) };
@@ -234,15 +238,44 @@ function progressTotals() {
   return { people, team };
 }
 
+// Skills improve, so the most recent Guest Interaction Check is the housekeeper's current level.
+function latestInteractionChecks() {
+  const latest = new Map();
+  const reports = state.reports.filter((report) => report.type === 'guest_interaction' && inGoalPeriod(report))
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.createdAt).localeCompare(String(b.createdAt)));
+  for (const report of reports) {
+    for (const entry of scoredEntries(report)) {
+      const scores = Object.fromEntries(INTERACTION_ITEMS.map((item) => [item, itemScore(entry, item)]));
+      const values = Object.values(scores).filter((value) => value !== null);
+      if (!entry.hkName || !values.length) continue;
+      const key = nameKey(entry.hkName);
+      latest.set(key, { date: report.date, scores, average: average(values), ready: values.length === INTERACTION_ITEMS.length && values.every((value) => value >= GUEST_READY), checks: (latest.get(key)?.checks || 0) + 1 });
+    }
+  }
+  return latest;
+}
+
 function goalsResponse() {
   const goals = state.goals.find((entry) => entry.id === 'current');
   const { people, team } = progressTotals();
+  const interaction = latestInteractionChecks();
   const hkProgress = goals.hkProgress.map(({ name }) => {
     const person = people.get(nameKey(name)) || {};
-    return { name, scores: Object.fromEntries(PROGRESS_COLUMNS.map((column) => [column, round1(average(person[column] || []))])), counts: Object.fromEntries(PROGRESS_COLUMNS.map((column) => [column, (person[column] || []).length])) };
+    const check = interaction.get(nameKey(name));
+    const scores = Object.fromEntries(PROGRESS_COLUMNS.map((column) => [column, round1(average(person[column] || []))]));
+    const counts = Object.fromEntries(PROGRESS_COLUMNS.map((column) => [column, (person[column] || []).length]));
+    scores.guestInteraction = check ? round1(check.average) : null;
+    counts.guestInteraction = check?.checks || 0;
+    return { name, scores, counts, interaction: check ? { date: check.date, scores: check.scores, ready: check.ready } : null };
   });
+  const ready = hkProgress.filter((row) => row.interaction?.ready).length;
+  const checked = hkProgress.filter((row) => row.interaction).length;
   // SMART rate = the team's average score in that area, as a percentage (8.6/10 -> 86%).
   const smartGoals = goals.smartGoals.map((goal) => {
+    if (goal.key === 'guest_interaction') {
+      // Share of the whole roster that is guest-ready; anyone never checked counts as not yet.
+      return { ...goal, rate: hkProgress.length ? Math.round(ready / hkProgress.length * 100) : 0, samples: hkProgress.length, detail: `${ready} of ${hkProgress.length} HK guest-ready (all three 8+) · ${checked} checked` };
+    }
     const values = team[SMART_SOURCES[goal.key]] || [];
     return { ...goal, rate: values.length ? Math.round(average(values) * 10) : 0, samples: values.length };
   });
@@ -328,7 +361,7 @@ function reportSummary(report) {
   const flaggedEntries = entries.filter((entry) => {
     const values = scoreValues(entry);
     const average = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 10;
-    return average < threshold || entry.status === 'Broken' || Boolean(entry.remarks);
+    return average < threshold || entry.status === 'Broken' || (report.type !== 'guest_interaction' && Boolean(entry.remarks));
   });
   return {
     itemCount: entries.length || (report.data?.items ? report.data.items.length : 0),
@@ -675,6 +708,9 @@ app.post('/api/reports', authMiddleware, (req, res) => {
   const submitter = currentUser(req);
   if (!roleReportTypes[submitter?.role]?.includes(type)) {
     return res.status(403).json({ message: 'Your role cannot submit this report type.' });
+  }
+  if (type === 'guest_interaction' && (!Array.isArray(data.entries) || !data.entries.length || data.entries.some((entry) => !String(entry?.hkName || '').trim()))) {
+    return res.status(400).json({ message: 'Add the housekeeper being assessed.' });
   }
   if (type === 'inspection_rate') {
     const evaluated = state.users.find((user) => user.id === data.supervisorId && user.role === 'supervisor' && user.active !== false);

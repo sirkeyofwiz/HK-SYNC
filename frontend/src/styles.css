@@ -238,6 +238,8 @@ header .kicker { font-size: 18px; color: var(--accent); }
 .tag.good { background: var(--pale); color: var(--green); }
 .table-foot { background: #f7f9f7; font-size: 12px; font-weight: 700; }
 .room-total { margin: 0 0 4px; font-size: 12px; }
+.score-grid.three { grid-template-columns: repeat(3, 1fr); }
+.criteria-help { margin: 0 0 4px; padding-left: 18px; color: var(--slate); font-size: 11px; line-height: 1.6; }
 .glance-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
 .glance-stats div { padding: 12px; border-radius: 6px; background: #f7f9f7; }
 .glance-stats strong { display: block; font-size: 22px; }
