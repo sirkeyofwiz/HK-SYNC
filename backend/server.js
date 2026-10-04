@@ -295,6 +295,88 @@ const GOALS_SHAPE = {
   hkProgress: (rows) => rows.map((row) => ({ name: cleanName(row.name) }))
 };
 
+// ---------- Housekeeper profiles ----------
+// Strength = item averaging 8+, weakness = under 7, each only once scored at least 3 times (user's choice, 2026-10-04).
+const PROFILE_MIN_SCORES = 3;
+const STRENGTH_AT = 8;
+const WEAKNESS_BELOW = 7;
+const PROFILE_GROUPS = ['Room quality', 'Neglected areas', 'Trolley', 'Pantry', 'Guest interaction'];
+const TYPE_LABELS = { quality: 'Quality Checklist', neglected: 'Neglected Area', trolley_pantry: 'Trolley / Pantry', guest_interaction: 'Guest Interaction Check' };
+const inProfilePeriod = (report, period) => (period === 'all' ? !report.voided : inGoalPeriod(report));
+
+// Every scored line about a housekeeper, labelled so items from different report types never mix.
+function profileLines(report) {
+  const list = (key) => (Array.isArray(report.data?.[key]) ? report.data[key] : []);
+  switch (report.type) {
+    case 'quality': return list('entries').map((entry) => ({ entry, group: 'Room quality', prefix: '', place: entry.room ? `Room ${entry.room}` : '' }));
+    case 'neglected': return list('entries').map((entry) => ({ entry, group: 'Neglected areas', prefix: 'Neglected: ', place: entry.room || report.data?.area || '' }));
+    case 'trolley_pantry': return [
+      ...list('trolleys').map((entry) => ({ entry, group: 'Trolley', prefix: 'Trolley: ', place: entry.block ? `Block ${entry.block}` : 'Trolley' })),
+      ...list('pantries').map((entry) => ({ entry, group: 'Pantry', prefix: 'Pantry: ', place: entry.block ? `Block ${entry.block}` : 'Pantry' }))
+    ];
+    case 'guest_interaction': return list('entries').map((entry) => ({ entry, group: 'Guest interaction', prefix: '', place: '' }));
+    default: return [];
+  }
+}
+
+// One pass over the reports: per-person items, rooms and guest checks, plus team values per item.
+function buildProfiles(period) {
+  const people = new Map();
+  const team = new Map();
+  const reports = state.reports.filter((report) => TYPE_LABELS[report.type] && inProfilePeriod(report, period))
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.createdAt).localeCompare(String(b.createdAt)));
+  for (const report of reports) {
+    for (const line of profileLines(report)) {
+      const scored = Object.keys(line.entry?.scores || {}).map((key) => [line.prefix + key, itemScore(line.entry, key)]).filter(([, value]) => value !== null);
+      for (const [label, value] of scored) {
+        if (!team.has(label)) team.set(label, []);
+        team.get(label).push(value);
+      }
+      if (!line.entry?.hkName || !scored.length) continue;
+      const key = nameKey(line.entry.hkName);
+      const person = people.get(key) || { items: new Map(), rooms: [], checks: [] };
+      for (const [label, value] of scored) {
+        const item = person.items.get(label) || { label, group: line.group, values: [] };
+        item.values.push(value);
+        person.items.set(label, item);
+      }
+      const lineAverage = round1(average(scored.map(([, value]) => value)));
+      if (report.type === 'guest_interaction') {
+        person.checks.push({ date: report.date, scores: Object.fromEntries(INTERACTION_ITEMS.map((item) => [item, itemScore(line.entry, item)])), average: lineAverage, note: line.entry.remarks || '' });
+      } else {
+        person.rooms.push({ reportId: report.id, date: report.date, type: TYPE_LABELS[report.type], place: line.place, average: lineAverage, remarks: line.entry.remarks || '' });
+      }
+      people.set(key, person);
+    }
+  }
+  return { people, team };
+}
+
+function profileFor(name, { people, team }) {
+  const person = people.get(nameKey(name)) || { items: new Map(), rooms: [], checks: [] };
+  const items = [...person.items.values()].map((item) => ({ label: item.label, group: item.group, average: round1(average(item.values)), count: item.values.length, team: round1(average(team.get(item.label) || [])) }))
+    .sort((a, b) => PROFILE_GROUPS.indexOf(a.group) - PROFILE_GROUPS.indexOf(b.group) || a.average - b.average);
+  const rated = items.filter((item) => item.count >= PROFILE_MIN_SCORES);
+  const months = new Map();
+  for (const room of person.rooms) {
+    const month = String(room.date).slice(0, 7);
+    if (!months.has(month)) months.set(month, []);
+    months.get(month).push(room.average);
+  }
+  return {
+    name,
+    rooms: person.rooms.length,
+    average: round1(average(person.rooms.map((room) => room.average))),
+    lastInspected: person.rooms.at(-1)?.date || null,
+    strengths: rated.filter((item) => item.average >= STRENGTH_AT).sort((a, b) => b.average - a.average || b.count - a.count).slice(0, 3),
+    weaknesses: rated.filter((item) => item.average < WEAKNESS_BELOW).sort((a, b) => a.average - b.average || b.count - a.count).slice(0, 3),
+    items,
+    trend: [...months.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([month, values]) => ({ month, average: round1(average(values)), rooms: values.length })),
+    flagged: person.rooms.filter((room) => room.average < 6 || room.remarks).reverse().slice(0, 10),
+    checks: [...person.checks].reverse().slice(0, 10)
+  };
+}
+
 const server = app.listen(process.env.PORT || 5000, () => {
   console.log(`HK SYNC backend running on port ${process.env.PORT || 5000}`);
 });
@@ -726,6 +808,37 @@ app.post('/api/reports', authMiddleware, (req, res) => {
   return res.status(201).json({ report: { ...report, data: withoutPhotos(report.data), ...reportSummary(report) } });
 });
 
+const profilePeriod = (req) => (req.query.period === 'all' ? 'all' : 'year');
+const currentRoster = () => state.goals.find((entry) => entry.id === 'current').hkProgress;
+
+// Names only, for the "HK name" suggestions on report forms (supervisors fill those but can't open Goals).
+app.get('/api/hk-roster', authMiddleware, (req, res) => {
+  return res.json({ names: currentRoster().map((row) => row.name) });
+});
+
+app.get('/api/hk-profiles', authMiddleware, requireManager, (req, res) => {
+  const period = profilePeriod(req);
+  const built = buildProfiles(period);
+  const profiles = currentRoster().map(({ name }) => {
+    const profile = profileFor(name, built);
+    return { name, rooms: profile.rooms, average: profile.average, lastInspected: profile.lastInspected, strength: profile.strengths[0] || null, weakness: profile.weaknesses[0] || null };
+  });
+  return res.json({ period, profiles, rules: { minScores: PROFILE_MIN_SCORES, strengthAt: STRENGTH_AT, weaknessBelow: WEAKNESS_BELOW } });
+});
+
+app.get('/api/hk-profiles/:name', authMiddleware, requireManager, (req, res) => {
+  const period = profilePeriod(req);
+  const name = String(req.params.name || '').trim();
+  const goals = goalsResponse();
+  const progress = goals.hkProgress.find((row) => nameKey(row.name) === nameKey(name));
+  const points = goals.hkPoints.find((row) => nameKey(row.name) === nameKey(name));
+  return res.json({
+    period,
+    profile: { ...profileFor(name, buildProfiles(period)), onRoster: Boolean(progress), progress: progress?.scores || null, interaction: progress?.interaction || null, points: { points: points?.points || 0, target: POINTS_TARGETS.hk, deadline: POINTS_TARGETS.deadline } },
+    rules: { minScores: PROFILE_MIN_SCORES, strengthAt: STRENGTH_AT, weaknessBelow: WEAKNESS_BELOW }
+  });
+});
+
 app.get('/api/goals', authMiddleware, requireManager, (req, res) => {
   return res.json({ goals: goalsResponse() });
 });
@@ -744,10 +857,34 @@ app.put('/api/goals', authMiddleware, requireManager, (req, res) => {
     }
     goals[section] = clean(req.body[section], goals);
   }
+  // Renaming someone on the roster can also rename them in past reports, so their history stays in one profile.
+  let renamedLines = 0;
+  const renames = Array.isArray(req.body?.renames) ? req.body.renames.slice(0, 50) : [];
+  for (const rename of renames) {
+    const fromKey = nameKey(rename?.from);
+    const to = cleanName(rename?.to);
+    if (!fromKey || !to || fromKey === nameKey(to) || !goals.hkProgress.some((row) => nameKey(row.name) === nameKey(to))) continue;
+    for (const report of state.reports) {
+      let changed = false;
+      for (const list of ['entries', 'trolleys', 'pantries']) {
+        for (const entry of Array.isArray(report.data?.[list]) ? report.data[list] : []) {
+          if (entry && nameKey(entry.hkName) === fromKey) {
+            entry.hkName = to;
+            changed = true;
+            renamedLines += 1;
+          }
+        }
+      }
+      if (changed) {
+        report.updatedAt = new Date().toISOString();
+        saveRow('reports', report);
+      }
+    }
+  }
   goals.updatedAt = new Date().toISOString();
   goals.updatedBy = req.currentUser.name;
   saveRow('goals', goals);
-  return res.json({ goals: goalsResponse() });
+  return res.json({ goals: goalsResponse(), renamedLines });
 });
 
 app.post('/api/reports/:id/sign', authMiddleware, requireManager, (req, res) => {
