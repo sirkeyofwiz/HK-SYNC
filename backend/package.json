@@ -16,5 +16,11 @@
     "jsonwebtoken": "^9.0.2",
     "socket.io": "^4.8.1",
     "web-push": "^3.6.7"
+  },
+  "engines": {
+    "node": "24.x"
+  },
+  "allowScripts": {
+    "better-sqlite3": true
   }
 }

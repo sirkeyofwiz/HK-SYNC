@@ -484,6 +484,11 @@ button.report-line:hover strong { color: var(--accent); }
 .entry-title > b { font: 500 12px 'DM Mono', monospace; color: var(--green); }
 .entry-card .photo { margin-left: auto; background: #eef5ef; padding: 7px 10px; border-radius: 5px; color: var(--green); }
 .photo input { display: none; }
+.photo-picker { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
+.entry-card .photo-picker .photo { margin-left: 0; cursor: pointer; }
+.photo-picker.has-photo .photo { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px 4px 4px; font-weight: 600; }
+.photo-picker .photo img { width: 34px; height: 34px; object-fit: cover; border-radius: 4px; }
+.photo-remove { width: 30px; height: 30px; border-radius: 50%; background: #f6e8e6; color: var(--red, #b42318); font-size: 18px; line-height: 1; padding: 0; }
 .form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
 .score-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 16px 0; }
 .score-grid label, .vehicle label { font-size: 10px; }

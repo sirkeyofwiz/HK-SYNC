@@ -875,8 +875,16 @@ app.post('/api/reports', authMiddleware, (req, res) => {
 
 // Reject malformed reports before they are stored: one bad row would otherwise break the report and goals pages for everyone.
 const REPORT_LINE_LIMIT = 200;
+const REPORT_BACKDATE_DAYS = 7;
+// YYYY-MM-DD in the hotel's time zone, offset by whole days.
+const dateInAppZone = (offsetDays) => new Intl.DateTimeFormat('en-CA', { timeZone: APP_TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(Date.now() + offsetDays * 86400000));
 function reportProblem(date, data) {
   if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date))) return 'Choose a valid report date.';
+  // Up to a week back for late paperwork, never ahead (one day of slack for phones on another clock), so points can't be stockpiled.
+  // ALLOW_ANY_REPORT_DATE=1 switches this off, e.g. while importing old paper reports or in automated tests.
+  const today = dateInAppZone(0);
+  if (!process.env.ALLOW_ANY_REPORT_DATE && date > dateInAppZone(1)) return 'A report cannot be dated in the future.';
+  if (!process.env.ALLOW_ANY_REPORT_DATE && date < dateInAppZone(-REPORT_BACKDATE_DAYS)) return `Reports can only be dated up to ${REPORT_BACKDATE_DAYS} days back (earliest ${dateInAppZone(-REPORT_BACKDATE_DAYS)}, today is ${today}).`;
   if (!isPlainObject(data)) return 'The report is missing its details.';
   for (const key of ['entries', 'trolleys', 'pantries']) {
     const lines = data[key];
