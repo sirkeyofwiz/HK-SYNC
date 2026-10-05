@@ -1728,4 +1728,29 @@ app.use((error, req, res, next) => {
   return res.status(500).json({ message: 'Something went wrong on the server.' });
 });
 
+// Railway retires the old copy with SIGTERM on every deploy. Finish open requests and any backup in progress,
+// close the database properly and exit normally, so a deploy isn't reported as a crash. Never hang longer than 8s.
+let shuttingDown = false;
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`${signal} received: shutting down cleanly.`);
+  let closed = false;
+  const finish = () => {
+    if (closed) return;
+    closed = true;
+    try { database.close(); } catch (error) { console.error('Closing the database failed:', error.message); }
+    process.exitCode = 0; // let Node exit on its own once everything is closed
+  };
+  // Backstop: if something keeps the process alive, leave anyway (still a clean exit code).
+  setTimeout(() => { finish(); process.exit(0); }, 8000).unref();
+  Promise.resolve(backupRunning).catch(() => {}).finally(() => {
+    io.close();
+    server.close(() => finish());
+    server.closeIdleConnections?.();
+  });
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
 export default server;
