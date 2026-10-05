@@ -76,6 +76,8 @@ if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
   throw new Error('JWT_SECRET must be configured in production.');
 }
 const JWT_SECRET = process.env.JWT_SECRET || 'local-development-secret';
+// Dates (goals year, report-date limits, quiet hours) follow the hotel's clock, not the server's.
+const APP_TIMEZONE = process.env.APP_TIMEZONE || 'Africa/Dar_es_Salaam';
 const onlineUsers = new Map(); // userId -> Set of socket ids
 const roleReportTypes = {
   supervisor: ['neglected', 'quality', 'trolley_pantry', 'handover', 'guest_interaction'],
@@ -168,17 +170,30 @@ if (!state.goals.length) {
   }
 }
 
-// Goals count reports from this financial year only, so the point targets reset each year.
-const GOAL_PERIOD = { start: '2026-10-01', end: '2027-09-30' };
-const POINTS_TARGETS = { supervisor: 500, hk: 150, deadline: GOAL_PERIOD.end, periodStart: GOAL_PERIOD.start };
-const inGoalPeriod = (report) => !report.voided && String(report.date) >= GOAL_PERIOD.start && String(report.date) <= GOAL_PERIOD.end;
+// The goals year runs 1 October – 30 September and rolls over by itself on 1 October (hotel time):
+// points and averages start again from zero each year, and earlier years stay viewable.
+const appToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: APP_TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+const goalYearOf = (isoDate) => { const [year, month] = String(isoDate).split('-').map(Number); return month >= 10 ? year : year - 1; };
+const currentGoalYear = () => goalYearOf(appToday());
+function goalPeriod(startYear = currentGoalYear()) {
+  return { startYear, start: `${startYear}-10-01`, end: `${startYear + 1}-09-30`, label: `${startYear}/${String(startYear + 1).slice(2)}`, current: startYear === currentGoalYear() };
+}
+// Every goals year from the first report to today, newest first.
+function goalYears() {
+  const current = currentGoalYear();
+  const first = state.reports.reduce((earliest, report) => (/^\d{4}-\d{2}-\d{2}$/.test(String(report.date)) ? Math.min(earliest, goalYearOf(report.date)) : earliest), current);
+  return Array.from({ length: current - first + 1 }, (_, index) => current - index);
+}
+const POINTS_TARGET = { supervisor: 500, hk: 150 };
+const pointsTargets = (period) => ({ ...POINTS_TARGET, deadline: period.end, periodStart: period.start });
+const inGoalPeriod = (report, period) => !report.voided && String(report.date) >= period.start && String(report.date) <= period.end;
 const HK_POINT_TYPES = ['quality', 'neglected', 'trolley_pantry'];
 const sum = (values) => values.reduce((total, value) => total + value, 0);
 const nameKey = (name) => String(name || '').trim().toLowerCase();
 
 // Supervisor points: every room total (out of 50) from Inspection Rate Program reports about them, plus a cumulative history.
-function supervisorPoints() {
-  const reports = state.reports.filter((report) => report.type === 'inspection_rate' && inGoalPeriod(report))
+function supervisorPoints(period) {
+  const reports = state.reports.filter((report) => report.type === 'inspection_rate' && inGoalPeriod(report, period))
     .sort((a, b) => String(a.date).localeCompare(String(b.date)));
   return state.users.filter((user) => user.role === 'supervisor' && user.active !== false).map((supervisor) => {
     let points = 0;
@@ -193,10 +208,10 @@ function supervisorPoints() {
 
 // HK points: each inspected room adds its average score (max 10), whichever report type it came from,
 // so a 17-box Quality Checklist room counts the same as a 3-box Neglected Area room.
-function hkPoints(roster) {
+function hkPoints(roster, period) {
   const totals = new Map();
   for (const report of state.reports) {
-    if (!inGoalPeriod(report) || !HK_POINT_TYPES.includes(report.type)) continue;
+    if (!inGoalPeriod(report, period) || !HK_POINT_TYPES.includes(report.type)) continue;
     for (const entry of scoredEntries(report)) {
       const values = scoreValues(entry);
       if (!entry.hkName || !values.length) continue;
@@ -249,11 +264,11 @@ function progressValues(report, entry) {
 }
 
 // Collects every column value this financial year, per housekeeper (by name) and for the whole team.
-function progressTotals() {
+function progressTotals(period) {
   const people = new Map();
   const team = Object.fromEntries(PROGRESS_COLUMNS.map((column) => [column, []]));
   for (const report of state.reports) {
-    if (!HK_POINT_TYPES.includes(report.type) || !inGoalPeriod(report)) continue;
+    if (!HK_POINT_TYPES.includes(report.type) || !inGoalPeriod(report, period)) continue;
     for (const entry of scoredEntries(report)) {
       for (const [column, value] of Object.entries(progressValues(report, entry))) {
         if (value === null || value === undefined) continue;
@@ -269,9 +284,9 @@ function progressTotals() {
 }
 
 // Skills improve, so the most recent Guest Interaction Check is the housekeeper's current level.
-function latestInteractionChecks() {
+function latestInteractionChecks(period) {
   const latest = new Map();
-  const reports = state.reports.filter((report) => report.type === 'guest_interaction' && inGoalPeriod(report))
+  const reports = state.reports.filter((report) => report.type === 'guest_interaction' && inGoalPeriod(report, period))
     .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.createdAt).localeCompare(String(b.createdAt)));
   for (const report of reports) {
     for (const entry of scoredEntries(report)) {
@@ -285,10 +300,11 @@ function latestInteractionChecks() {
   return latest;
 }
 
-function goalsResponse() {
+// Roster names and SMART targets are shared by every year; all scores come from that year's reports.
+function goalsResponse(period = goalPeriod()) {
   const goals = state.goals.find((entry) => entry.id === 'current');
-  const { people, team } = progressTotals();
-  const interaction = latestInteractionChecks();
+  const { people, team } = progressTotals(period);
+  const interaction = latestInteractionChecks(period);
   const hkProgress = goals.hkProgress.map(({ name }) => {
     const person = people.get(nameKey(name)) || {};
     const check = interaction.get(nameKey(name));
@@ -311,9 +327,9 @@ function goalsResponse() {
   });
   return {
     id: goals.id, updatedAt: goals.updatedAt, updatedBy: goals.updatedBy,
-    year: `${GOAL_PERIOD.start.slice(0, 4)}/${GOAL_PERIOD.end.slice(2, 4)}`,
-    targets: POINTS_TARGETS, smartGoals, hkProgress,
-    supervisorPoints: supervisorPoints(), hkPoints: hkPoints(goals.hkProgress)
+    year: period.label, startYear: period.startYear, current: period.current, years: goalYears(),
+    targets: pointsTargets(period), smartGoals, hkProgress,
+    supervisorPoints: supervisorPoints(period), hkPoints: hkPoints(goals.hkProgress, period)
   };
 }
 
@@ -332,7 +348,7 @@ const STRENGTH_AT = 8;
 const WEAKNESS_BELOW = 7;
 const PROFILE_GROUPS = ['Room quality', 'Neglected areas', 'Trolley', 'Pantry', 'Guest interaction'];
 const TYPE_LABELS = { quality: 'Quality Checklist', neglected: 'Neglected Area', trolley_pantry: 'Trolley / Pantry', guest_interaction: 'Guest Interaction Check' };
-const inProfilePeriod = (report, period) => (period === 'all' ? !report.voided : inGoalPeriod(report));
+const inProfilePeriod = (report, period) => (period === 'all' ? !report.voided : inGoalPeriod(report, goalPeriod()));
 
 // Every scored line about a housekeeper, labelled so items from different report types never mix.
 function profileLines(report) {
@@ -923,13 +939,15 @@ app.get('/api/hk-profiles/:name', authMiddleware, requireManager, (req, res) => 
   const points = goals.hkPoints.find((row) => nameKey(row.name) === nameKey(name));
   return res.json({
     period,
-    profile: { ...profileFor(name, buildProfiles(period)), onRoster: Boolean(progress), progress: progress?.scores || null, interaction: progress?.interaction || null, points: { points: points?.points || 0, target: POINTS_TARGETS.hk, deadline: POINTS_TARGETS.deadline } },
+    profile: { ...profileFor(name, buildProfiles(period)), onRoster: Boolean(progress), progress: progress?.scores || null, interaction: progress?.interaction || null, points: { points: points?.points || 0, target: goals.targets.hk, deadline: goals.targets.deadline } },
     rules: { minScores: PROFILE_MIN_SCORES, strengthAt: STRENGTH_AT, weaknessBelow: WEAKNESS_BELOW }
   });
 });
 
+// ?year=2026 shows the goals year that started 1 October 2026; anything else shows the current year.
 app.get('/api/goals', authMiddleware, requireManager, (req, res) => {
-  return res.json({ goals: goalsResponse() });
+  const year = Number(req.query.year);
+  return res.json({ goals: goalsResponse(goalYears().includes(year) ? goalPeriod(year) : goalPeriod()) });
 });
 
 // Saves SMART targets and roster names only; every score is calculated on read.
@@ -1216,7 +1234,6 @@ const DEFAULT_NOTIFY = {
   preview: true,
   sound: true
 };
-const APP_TIMEZONE = process.env.APP_TIMEZONE || 'Africa/Dar_es_Salaam';
 const REPORT_LABELS = { neglected: 'Neglected Area', quality: 'Quality Checklist', trolley_pantry: 'Trolley / Pantry', handover: 'Shift Handover', vehicle: 'Vehicle Checklist', tools: 'Tools Control', inspection_rate: 'Inspection Rate Program', guest_interaction: 'Guest Interaction Check' };
 const NOTIFICATION_DAYS = 60;
 
