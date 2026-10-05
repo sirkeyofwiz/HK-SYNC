@@ -10,6 +10,7 @@ import { Server } from 'socket.io';
 import Database from 'better-sqlite3';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import webpush from 'web-push';
+import { backupConfigured, runBackup, listSnapshots, databaseSnapshot, restoreIfRequested, describeError, DAILY_KEEP, MONTHLY_KEEP } from './backup.js';
 
 dotenv.config();
 
@@ -25,6 +26,13 @@ if (!fs.existsSync(DATA_DIR)) {
 
 const dataFilePath = path.join(DATA_DIR, 'db.json');
 const databasePath = path.join(DATA_DIR, 'bahari.sqlite');
+// RESTORE_BACKUP=<backup name> swaps in a backup from the bucket before anything is opened (see backup.js).
+// A failed restore must never stop the app: it logs the problem and carries on with the current data.
+try {
+  await restoreIfRequested({ dataDir: DATA_DIR, databasePath, uploadDir: path.join(DATA_DIR, 'uploads') });
+} catch (error) {
+  console.error('RESTORE_BACKUP failed, keeping the current database:', describeError(error));
+}
 const database = new Database(databasePath);
 database.pragma('journal_mode = WAL');
 database.exec(`
@@ -1621,6 +1629,91 @@ io.on('connection', (socket) => {
       io.emit('presence:update', { userId, isOnline: false });
     }
   });
+});
+
+// ---------- Backups ----------
+// Nightly after 02:00 hotel time (and soon after start if the last one is over a day old). Only the manager can
+// see, run or download backups: a backup holds everything, including password hashes.
+const BACKUP_HOUR = 2;
+let backupRunning = null;
+const backupRecord = () => state.settings.find((entry) => entry.id === 'backup') || null;
+function saveBackupRecord(changes) {
+  let record = backupRecord();
+  if (!record) { record = { id: 'backup' }; state.settings.push(record); }
+  Object.assign(record, changes);
+  saveRow('settings', record);
+  return record;
+}
+const hotelHour = () => Number(new Intl.DateTimeFormat('en-GB', { timeZone: APP_TIMEZONE, hour: '2-digit', hourCycle: 'h23' }).format(new Date()));
+
+function backupNow(trigger) {
+  if (backupRunning) return backupRunning;
+  backupRunning = (async () => {
+    const startedAt = new Date().toISOString();
+    try {
+      const result = await runBackup({ database, dataDir: DATA_DIR, uploadDir: UPLOAD_DIR, attachmentIds: state.attachments.map((entry) => entry.id), today: appToday() });
+      saveBackupRecord({ lastSuccess: { at: new Date().toISOString(), day: appToday(), trigger, ...result }, lastError: null });
+      console.log(`Backup saved: ${result.key} (${Math.round(result.size / 1024)} KB, ${result.filesUploaded} new chat files, ${result.snapshotsKept} copies kept).`);
+      return result;
+    } catch (error) {
+      saveBackupRecord({ lastError: { at: startedAt, trigger, message: describeError(error) } });
+      console.error('Backup failed:', describeError(error));
+      throw error;
+    } finally {
+      backupRunning = null;
+    }
+  })();
+  return backupRunning;
+}
+
+function scheduledBackup() {
+  if (!backupConfigured || backupRunning) return;
+  const record = backupRecord();
+  const lastAt = record?.lastSuccess?.at ? new Date(record.lastSuccess.at).getTime() : 0;
+  // After a failure, wait an hour before trying again.
+  if (record?.lastError && Date.now() - new Date(record.lastError.at).getTime() < 60 * 60 * 1000) return;
+  const overdue = Date.now() - lastAt > 26 * 60 * 60 * 1000;
+  const tonightsDue = hotelHour() >= BACKUP_HOUR && record?.lastSuccess?.day !== appToday();
+  if (overdue || tonightsDue) backupNow('scheduled').catch(() => {});
+}
+if (backupConfigured) {
+  setTimeout(scheduledBackup, 60 * 1000).unref();
+  setInterval(scheduledBackup, 10 * 60 * 1000).unref();
+} else {
+  console.log('Backups are not set up (BACKUP_* settings missing).');
+}
+
+function requireOwnerManager(req, res, next) {
+  if (req.currentUser.role !== 'manager') return res.status(403).json({ message: 'Only the manager can manage backups.' });
+  next();
+}
+async function backupStatus() {
+  const record = backupRecord();
+  let snapshots = [];
+  let listError = null;
+  if (backupConfigured) {
+    try { snapshots = await listSnapshots(); } catch (error) { listError = describeError(error); }
+  }
+  return { configured: backupConfigured, running: Boolean(backupRunning), lastSuccess: record?.lastSuccess || null, lastError: record?.lastError || listError && { at: new Date().toISOString(), message: listError }, snapshots: snapshots.slice(0, 30), schedule: { hour: BACKUP_HOUR, timezone: APP_TIMEZONE, dailyKept: DAILY_KEEP, monthlyKept: MONTHLY_KEEP } };
+}
+
+app.get('/api/backups', authMiddleware, requireManager, requireOwnerManager, async (req, res) => res.json(await backupStatus()));
+
+app.post('/api/backups/run', authMiddleware, requireManager, requireOwnerManager, async (req, res) => {
+  if (!backupConfigured) return res.status(400).json({ message: 'Backups are not set up yet.' });
+  try {
+    await backupNow(`manual by ${req.currentUser.name}`);
+  } catch (error) {
+    return res.status(502).json({ message: `The backup failed: ${describeError(error)}`, status: await backupStatus() });
+  }
+  return res.json(await backupStatus());
+});
+
+// A copy to keep somewhere else (a computer, Google Drive). Chat files are only in the bucket backups.
+app.get('/api/backups/download', authMiddleware, requireManager, requireOwnerManager, async (req, res) => {
+  const snapshot = await databaseSnapshot(database, DATA_DIR);
+  res.set({ 'Content-Type': 'application/gzip', 'Content-Disposition': `attachment; filename="hk-sync-backup-${appToday()}.sqlite.gz"`, 'Cache-Control': 'no-store' });
+  return res.send(snapshot);
 });
 
 app.use((req, res) => {

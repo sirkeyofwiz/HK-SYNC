@@ -656,3 +656,14 @@ summary { cursor: pointer; color: var(--green); font-weight: 700; }
 .year-picker { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--slate); }
 .year-picker select { min-width: 170px; }
 .year-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; background: #fbf3e0; color: #7a5a12; padding: 12px 16px; border-radius: 6px; margin-bottom: 18px; font-size: 13px; }
+
+/* Backups panel (manager's Account page) */
+.backups { margin-top: 18px; }
+.backup-state { padding: 10px 14px; border-radius: 6px; font-size: 13px; margin: 6px 0 10px; }
+.backup-state.good { background: #dcefe2; color: #276343; }
+.backup-state.warn { background: #fbf3e0; color: #7a5a12; }
+.backup-state.bad { background: #f8e4e2; color: #8f2d2a; }
+.backup-list { list-style: none; padding: 0; margin: 12px 0; display: grid; gap: 4px; }
+.backup-list li { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.backup-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.backup-note { margin-top: 10px; }
