@@ -47,10 +47,30 @@ app.use(cors({
   origin: allowedOrigins,
   credentials: true,
 }));
+// Express 4 doesn't catch errors from async handlers: one bad request would crash the whole server for everyone.
+// Wrap every route handler so thrown errors and rejected promises go to the error handler at the bottom instead.
+const forwardErrors = (handler) => (typeof handler !== 'function' || handler.length > 3 ? handler : (req, res, next) => {
+  try {
+    const result = handler(req, res, next);
+    if (result && typeof result.catch === 'function') result.catch(next);
+  } catch (error) {
+    next(error);
+  }
+});
+for (const method of ['get', 'post', 'put', 'patch', 'delete']) {
+  const register = app[method].bind(app);
+  app[method] = (route, ...handlers) => register(route, ...handlers.map(forwardErrors));
+}
+// Last safety net for anything outside a request (timers, sockets, push): log it, keep serving.
+process.on('unhandledRejection', (error) => console.error('Unhandled rejection:', error));
+process.on('uncaughtException', (error) => console.error('Uncaught exception:', error));
 app.use(express.json({ limit: '10mb' }));
 // Railway and Render sit one proxy in front of the app; without this every request's IP is the proxy's.
 app.set('trust proxy', 1);
 
+const isPlainObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+// A report's line list (entries / trolleys / pantries), skipping anything that isn't a proper line.
+const reportLines = (report, key) => (Array.isArray(report?.data?.[key]) ? report.data[key].filter(isPlainObject) : []);
 const DEFAULT_STATE = { users: [], messages: [], reports: [], tasks: [], goals: [], attachments: [], settings: [], notifications: [], subscriptions: [] };
 if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
   throw new Error('JWT_SECRET must be configured in production.');
@@ -316,7 +336,7 @@ const inProfilePeriod = (report, period) => (period === 'all' ? !report.voided :
 
 // Every scored line about a housekeeper, labelled so items from different report types never mix.
 function profileLines(report) {
-  const list = (key) => (Array.isArray(report.data?.[key]) ? report.data[key] : []);
+  const list = (key) => reportLines(report, key);
   switch (report.type) {
     case 'quality': return list('entries').map((entry) => ({ entry, group: 'Room quality', prefix: '', place: entry.room ? `Room ${entry.room}` : '' }));
     case 'neglected': return list('entries').map((entry) => ({ entry, group: 'Neglected areas', prefix: 'Neglected: ', place: entry.room || report.data?.area || '' }));
@@ -440,7 +460,7 @@ const FLAG_THRESHOLDS = { inspection_rate: 8 };
 
 // Older reports carry a placeholder `entries` item on every type, so only read the lists that belong to the report type.
 function scoredEntries(report) {
-  const list = (key) => (Array.isArray(report.data?.[key]) ? report.data[key] : []);
+  const list = (key) => reportLines(report, key);
   if (report.type === 'trolley_pantry') return [...list('trolleys'), ...list('pantries')];
   return ['vehicle', 'handover'].includes(report.type) ? [] : list('entries');
 }
@@ -465,7 +485,8 @@ function reportSummary(report) {
 
 function withoutPhotos(data) {
   if (!data) return data;
-  const strip = (entries) => Array.isArray(entries) ? entries.map(({ photo, ...entry }) => ({ ...entry, hasPhoto: Boolean(photo) })) : entries;
+  if (!isPlainObject(data)) return {};
+  const strip = (entries) => Array.isArray(entries) ? entries.filter(isPlainObject).map(({ photo, ...entry }) => ({ ...entry, hasPhoto: Boolean(photo) })) : entries;
   return { ...data, entries: strip(data.entries), trolleys: strip(data.trolleys), pantries: strip(data.pantries) };
 }
 
@@ -618,7 +639,7 @@ app.post('/api/auth/login', async (req, res) => {
 
   const { email, password } = req.body || {};
 
-  if (!email || !password) {
+  if (typeof email !== 'string' || typeof password !== 'string' || !email || !password) {
     return res.status(400).json({ message: 'Email and password are required.' });
   }
 
@@ -673,7 +694,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
 
 app.post('/api/auth/reset-password', async (req, res) => {
   const { token, password } = req.body || {};
-  if (!token || typeof password !== 'string' || password.length < 8) {
+  if (typeof token !== 'string' || !token || typeof password !== 'string' || password.length < 8) {
     return res.status(400).json({ message: 'A reset token and password of at least 8 characters are required.' });
   }
   const tokenHash = createHash('sha256').update(token).digest('hex');
@@ -697,7 +718,7 @@ app.get('/api/users/me', authMiddleware, (req, res) => {
 
 app.post('/api/users/me/password', authMiddleware, async (req, res) => {
   const { currentPassword, newPassword } = req.body || {};
-  if (!currentPassword || typeof newPassword !== 'string' || newPassword.length < 8) {
+  if (typeof currentPassword !== 'string' || !currentPassword || typeof newPassword !== 'string' || newPassword.length < 8) {
     return res.status(400).json({ message: 'Your current password and a new password of at least 8 characters are required.' });
   }
   const user = currentUser(req);
@@ -737,7 +758,7 @@ function canManageRole(actor, role) {
 app.post('/api/users/staff', authMiddleware, requireManager, async (req, res) => {
   const { name, email, password, role } = req.body || {};
   const allowedRoles = [...FIELD_STAFF_ROLES, 'assistant_manager'];
-  if (!name || !email || !password || !allowedRoles.includes(role)) {
+  if (typeof name !== 'string' || typeof email !== 'string' || !name.trim() || !email.trim() || !password || !allowedRoles.includes(role)) {
     return res.status(400).json({ message: 'Name, email, password, and a valid staff role are required.' });
   }
   if (typeof password !== 'string' || password.length < 8) {
@@ -818,6 +839,8 @@ app.get('/api/reports/:id', authMiddleware, (req, res) => {
 app.post('/api/reports', authMiddleware, (req, res) => {
   const { type, date, data } = req.body || {};
   if (!type || !date || !data) return res.status(400).json({ message: 'Report type, date and data are required.' });
+  const problem = reportProblem(date, data);
+  if (problem) return res.status(400).json({ message: problem });
   const submitter = currentUser(req);
   if (!roleReportTypes[submitter?.role]?.includes(type)) {
     return res.status(403).json({ message: 'Your role cannot submit this report type.' });
@@ -849,6 +872,22 @@ app.post('/api/reports', authMiddleware, (req, res) => {
   }
   return res.status(201).json({ report: { ...report, data: withoutPhotos(report.data), ...summary } });
 });
+
+// Reject malformed reports before they are stored: one bad row would otherwise break the report and goals pages for everyone.
+const REPORT_LINE_LIMIT = 200;
+function reportProblem(date, data) {
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date))) return 'Choose a valid report date.';
+  if (!isPlainObject(data)) return 'The report is missing its details.';
+  for (const key of ['entries', 'trolleys', 'pantries']) {
+    const lines = data[key];
+    if (lines === undefined) continue;
+    if (!Array.isArray(lines)) return 'Some lines in this report are not valid. Reload the page and try again.';
+    if (lines.length > REPORT_LINE_LIMIT) return `A report can have at most ${REPORT_LINE_LIMIT} lines.`;
+    if (lines.some((line) => !isPlainObject(line) || (line.scores !== undefined && !isPlainObject(line.scores)))) return 'Some lines in this report are not valid. Reload the page and try again.';
+  }
+  if (data.vehicle !== undefined && !isPlainObject(data.vehicle)) return 'The vehicle checklist is not valid.';
+  return null;
+}
 
 const profilePeriod = (req) => (req.query.period === 'all' ? 'all' : 'year');
 const currentRoster = () => state.goals.find((entry) => entry.id === 'current').hkProgress;
