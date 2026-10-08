@@ -72,7 +72,8 @@ for (const method of ['get', 'post', 'put', 'patch', 'delete']) {
 // Last safety net for anything outside a request (timers, sockets, push): log it, keep serving.
 process.on('unhandledRejection', (error) => console.error('Unhandled rejection:', error));
 process.on('uncaughtException', (error) => console.error('Uncaught exception:', error));
-app.use(express.json({ limit: '10mb' }));
+// Report photos travel inside the report itself; 40 MB fits a full inspection with a photo on every line (~100 phone photos).
+app.use(express.json({ limit: '40mb' }));
 // Railway and Render sit one proxy in front of the app; without this every request's IP is the proxy's.
 app.set('trust proxy', 1);
 
