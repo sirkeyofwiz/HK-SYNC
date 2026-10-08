@@ -618,15 +618,21 @@ summary { cursor: pointer; color: var(--green); font-weight: 700; }
   .progress-table .table-row > .remove-row { justify-self: start; }
 }
 
-/* ---------- Phone (≤600px): bottom tab bar, logo moves into the header ---------- */
+/* ---------- Phone (≤600px): floating bottom tab bar, logo moves into the header ---------- */
 @media (max-width: 600px) {
-  body { padding-bottom: 70px; }
-  .rail { position: fixed; z-index: 10; bottom: 0; left: 0; width: 100%; height: 70px; padding: 8px 10px; flex-direction: row; justify-content: space-between; gap: 0; border-top: 1px solid #36564b; }
+  body { padding-bottom: 104px; }
+  .rail { position: fixed; z-index: 10; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); left: 14px; right: 14px; width: auto; height: 66px; padding: 0 8px; flex-direction: row; justify-content: space-between; gap: 0; border-radius: 26px; box-shadow: 0 14px 34px rgba(23, 43, 70, .28), 0 2px 6px rgba(23, 43, 70, .16); }
   .rail > .property-mark { display: none; }
-  .rail nav { flex: 1; flex-direction: row; justify-content: space-around; gap: 2px; min-width: 0; }
-  .chat { height: calc(100vh - 240px); height: calc(100dvh - 240px); min-height: 320px; }
-  main:has(> .notice) .chat { height: calc(100dvh - 302px); }
-  .rail nav button { flex: 1; min-width: 0; padding: 3px 2px; font-size: 9px; }
+  .rail nav { flex: 1; flex-direction: row; justify-content: space-around; align-items: stretch; gap: 2px; min-width: 0; height: 100%; }
+  .chat { height: calc(100vh - 274px); height: calc(100dvh - 274px); min-height: 320px; }
+  main:has(> .notice) .chat { height: calc(100dvh - 336px); }
+  .rail nav button { flex: 1; min-width: 0; padding: 10px 2px 8px; gap: 4px; align-content: end; font-size: 9px; color: #8fa3b8; transition: color .2s; }
+  .rail nav button b { display: grid; place-items: center; width: 26px; height: 26px; font-size: 19px; line-height: 1; border-radius: 50%; transition: transform .25s cubic-bezier(.3, 1.4, .5, 1), background .2s, box-shadow .2s; }
+  /* The active tab's icon lifts out of the bar into a circle; the page-coloured ring reads as a notch cut into the bar. */
+  .rail nav button.active { color: #fff; font-weight: 800; }
+  .rail nav button.active b { width: 48px; height: 48px; padding: 0; font-size: 21px; border-radius: 50%; background: var(--navy); color: #fff; transform: translateY(-24px); margin-bottom: -22px; box-shadow: 0 0 0 6px #f4f6f3, 0 8px 16px rgba(23, 43, 70, .3); }
+  .rail nav button.active .nav-badge { top: -22px; right: calc(50% - 30px); }
+  .nav-badge { top: 4px; right: calc(50% - 20px); box-shadow: 0 0 0 2px var(--navy); }
   .logout { align-self: center; margin: 0; min-width: 48px; padding: 3px 2px; }
   .property-mark { width: 52px; height: 52px; flex: 0 0 42px; }
   .content { padding-bottom: 8px; }
