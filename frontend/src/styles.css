@@ -32,7 +32,7 @@ textarea { min-height: 80px; resize: vertical; }
 .content { flex: 1; min-width: 0; }
 main { max-width: 1240px; margin: 0 auto; padding: 48px clamp(24px, 5vw, 76px); }
 
-.property-mark { display: grid; place-items: center; width: 68px; height: 68px; border-radius: 50%; background: #dceafd url('/logo-mark.webp') center / contain no-repeat; overflow: hidden; }
+.property-mark { display: grid; place-items: center; width: 68px; height: 68px; aspect-ratio: 1; border-radius: 50%; background: #dceafd url('/logo-mark.webp') center / cover no-repeat; overflow: hidden; }
 .property-mark.small { width: 42px; height: 42px; }
 
 .rail { width: 92px; background: var(--navy); color: #b8c9c1; display: flex; flex-direction: column; align-items: center; padding: 24px 12px; gap: 50px; }
@@ -634,10 +634,10 @@ summary { cursor: pointer; color: var(--green); font-weight: 700; }
   .rail nav button.active .nav-badge { top: -22px; right: calc(50% - 30px); }
   .nav-badge { top: 4px; right: calc(50% - 20px); box-shadow: 0 0 0 2px var(--navy); }
   .logout { align-self: center; margin: 0; min-width: 48px; padding: 3px 2px; }
-  .property-mark { width: 52px; height: 52px; flex: 0 0 42px; }
+  .property-mark { width: 52px; height: 52px; flex: 0 0 52px; }
   .content { padding-bottom: 8px; }
   header { min-height: 86px; gap: 12px; }
-  header::before { content: ''; width: 42px; height: 42px; flex: 0 0 42px; background: url('/logo-mark.webp') center / contain no-repeat; }
+  header::before { content: ''; width: 42px; height: 42px; flex: 0 0 42px; border-radius: 50%; background: url('/logo-mark.webp') center / cover no-repeat; }
   header > div:first-child { flex: 1; }
   header h1 { line-height: 1.15; }
   .heading { flex-direction: column; }
