@@ -917,6 +917,9 @@ function reportProblem(date, data) {
     if (!Array.isArray(lines)) return 'Some lines in this report are not valid. Reload the page and try again.';
     if (lines.length > REPORT_LINE_LIMIT) return `A report can have at most ${REPORT_LINE_LIMIT} lines.`;
     if (lines.some((line) => !isPlainObject(line) || (line.scores !== undefined && !isPlainObject(line.scores)))) return 'Some lines in this report are not valid. Reload the page and try again.';
+    // Every score is 0-10 (blank = not scored); one stray 85 would distort points, averages and goals for the whole year.
+    const outOfRange = lines.some((line) => Object.values(line.scores || {}).some((value) => value !== '' && value !== null && value !== undefined && !(Number.isFinite(Number(value)) && Number(value) >= 0 && Number(value) <= 10)));
+    if (outOfRange) return 'Scores must be between 0 and 10. Check the boxes and try again.';
   }
   if (data.vehicle !== undefined && !isPlainObject(data.vehicle)) return 'The vehicle checklist is not valid.';
   return null;
