@@ -51,6 +51,19 @@ const allowedOrigins = [...new Set([
   ...(process.env.CLIENT_URL || 'http://localhost:5173,http://127.0.0.1:5173').split(',').map((origin) => origin.trim()).filter(Boolean),
   'https://bahari-operations-web-production.up.railway.app'
 ])];
+// The API only ever answers the app with JSON or files: forbid framing, sniffing, referrers and caching of private data.
+app.disable('x-powered-by');
+app.use((req, res, next) => {
+  res.set({
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'",
+    'Referrer-Policy': 'no-referrer',
+    'Cache-Control': 'no-store' // attachments set their own private cache below
+  });
+  if (process.env.NODE_ENV === 'production') res.set('Strict-Transport-Security', 'max-age=31536000');
+  next();
+});
 app.use(cors({
   origin: allowedOrigins,
   credentials: true,
@@ -72,8 +85,12 @@ for (const method of ['get', 'post', 'put', 'patch', 'delete']) {
 // Last safety net for anything outside a request (timers, sockets, push): log it, keep serving.
 process.on('unhandledRejection', (error) => console.error('Unhandled rejection:', error));
 process.on('uncaughtException', (error) => console.error('Uncaught exception:', error));
-// Report photos travel inside the report itself; 40 MB fits a full inspection with a photo on every line (~100 phone photos).
-app.use(express.json({ limit: '40mb' }));
+// Requests are small JSON, except a new report: its photos travel inside it, and 40 MB fits a full inspection with a
+// photo on every line (~100 phone photos). That large limit is only granted after sign-in (see POST /api/reports),
+// so nobody can make the server parse huge bodies on public routes such as sign-in.
+const smallJson = express.json({ limit: '1mb' });
+const reportJson = express.json({ limit: '40mb' });
+app.use((req, res, next) => (req.method === 'POST' && req.path === '/api/reports' ? next() : smallJson(req, res, next)));
 // Railway and Render sit one proxy in front of the app; without this every request's IP is the proxy's.
 app.set('trust proxy', 1);
 
@@ -861,7 +878,7 @@ app.get('/api/reports/:id', authMiddleware, (req, res) => {
   return res.json({ report: { ...report, submitter: sanitizeUser(state.users.find((user) => user.id === report.submittedBy) || {}), ...reportSummary(report), threshold: FLAG_THRESHOLDS[report.type] ?? 6, discussion: discussionIndex(req.user.id).get(`report:${report.id}`) || null, canManage: isManagerRole(viewer) } });
 });
 
-app.post('/api/reports', authMiddleware, (req, res) => {
+app.post('/api/reports', authMiddleware, reportJson, (req, res) => {
   const { type, date, data } = req.body || {};
   if (!type || !date || !data) return res.status(400).json({ message: 'Report type, date and data are required.' });
   const problem = reportProblem(date, data);
@@ -921,6 +938,9 @@ function reportProblem(date, data) {
     const outOfRange = lines.some((line) => Object.values(line.scores || {}).some((value) => value !== '' && value !== null && value !== undefined && !(Number.isFinite(Number(value)) && Number(value) >= 0 && Number(value) <= 10)));
     if (outOfRange) return 'Scores must be between 0 and 10. Check the boxes and try again.';
   }
+  // A photo is a picture taken in the app, never a link: a web address would make every viewer's browser contact that site.
+  const badPhoto = ['entries', 'trolleys', 'pantries'].some((key) => (Array.isArray(data[key]) ? data[key] : []).some((line) => line.photo !== undefined && line.photo !== null && line.photo !== '' && !(typeof line.photo === 'string' && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(line.photo))));
+  if (badPhoto) return 'One of the photos is not a valid picture. Remove it and add it again.';
   if (data.vehicle !== undefined && !isPlainObject(data.vehicle)) return 'The vehicle checklist is not valid.';
   return null;
 }
@@ -1364,7 +1384,11 @@ app.get('/api/push/key', authMiddleware, (req, res) => res.json({ publicKey: VAP
 app.post('/api/push/subscribe', authMiddleware, (req, res) => {
   const subscription = req.body?.subscription;
   const endpoint = String(subscription?.endpoint || '');
-  if (!endpoint.startsWith('https://') || !subscription?.keys?.p256dh || !subscription?.keys?.auth) return res.status(400).json({ message: 'This browser did not provide a valid push registration.' });
+  // Only real browser push services (Google/Chrome, Mozilla/Firefox, Apple/Safari, Microsoft/Edge): the server posts to this
+  // address on every alert, so it must never be an address of the user's choosing.
+  const pushHost = (() => { try { const url = new URL(endpoint); return url.protocol === 'https:' ? url.hostname : ''; } catch { return ''; } })();
+  const knownPushService = /(^|\.)(fcm\.googleapis\.com|android\.googleapis\.com|push\.services\.mozilla\.com|push\.apple\.com|notify\.windows\.com)$/.test(pushHost);
+  if (!knownPushService || !subscription?.keys?.p256dh || !subscription?.keys?.auth) return res.status(400).json({ message: 'This browser did not provide a valid push registration.' });
   const id = createHash('sha256').update(endpoint).digest('hex');
   // A shared device belongs to whoever registered it last.
   const entry = { id, userId: req.user.id, endpoint, keys: { p256dh: String(subscription.keys.p256dh), auth: String(subscription.keys.auth) }, userAgent: String(req.headers['user-agent'] || '').slice(0, 200), createdAt: new Date().toISOString() };

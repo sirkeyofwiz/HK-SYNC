@@ -2,6 +2,19 @@
 root * dist
 encode gzip
 
+# Security headers for every response. The content security policy only lets the app load its own files, talk to
+# the HK-SYNC API (HTTPS and live-update websocket), load the Satoshi/DM Mono fonts, and show photos and voice notes
+# it created itself (data:/blob:). frame-ancestors stops other sites from embedding the app (clickjacking).
+# If the API moves to another address, update connect-src below.
+header {
+    Strict-Transport-Security "max-age=31536000"
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "DENY"
+    Referrer-Policy "strict-origin-when-cross-origin"
+    Permissions-Policy "camera=(self), microphone=(self), geolocation=(), payment=(), usb=()"
+    Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://api.fontshare.com https://fonts.googleapis.com; font-src 'self' https://cdn.fontshare.com https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://bahari-operations-api-production.up.railway.app wss://bahari-operations-api-production.up.railway.app; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+}
+
 # Never cache the main HTML file
 @html {
     path /index.html
