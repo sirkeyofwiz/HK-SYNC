@@ -463,6 +463,7 @@ button.report-line:hover strong { color: var(--accent); }
 .task-view .task-actions { flex-wrap: wrap; }
 .report-summary { margin-bottom: 18px; }
 .report-actions { flex-wrap: wrap; justify-content: start; margin-top: 16px; }
+.report-actions button.danger, .task-actions button.danger { color: var(--red); background: #fbe9e8; margin-left: auto; } /* Delete stands apart from the everyday actions */
 .line-section { display: flex; flex-direction: column; gap: 12px; margin-bottom: 18px; }
 .line-card.flash { animation: bubble-flash 1.6s ease; }
 .line-card .entry-title { flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }

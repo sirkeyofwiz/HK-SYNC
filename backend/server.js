@@ -875,7 +875,7 @@ app.get('/api/reports/:id', authMiddleware, (req, res) => {
   const viewer = currentUser(req);
   const report = state.reports.find((entry) => entry.id === req.params.id && !entry.voided);
   if (!canSeeReport(viewer, report)) return res.status(404).json({ message: 'Report not found.' });
-  return res.json({ report: { ...report, submitter: sanitizeUser(state.users.find((user) => user.id === report.submittedBy) || {}), ...reportSummary(report), threshold: FLAG_THRESHOLDS[report.type] ?? 6, discussion: discussionIndex(req.user.id).get(`report:${report.id}`) || null, canManage: isManagerRole(viewer) } });
+  return res.json({ report: { ...report, submitter: sanitizeUser(state.users.find((user) => user.id === report.submittedBy) || {}), ...reportSummary(report), threshold: FLAG_THRESHOLDS[report.type] ?? 6, discussion: discussionIndex(req.user.id).get(`report:${report.id}`) || null, canManage: isManagerRole(viewer), canDelete: canDeleteReport(viewer, report) } });
 });
 
 app.post('/api/reports', authMiddleware, reportJson, (req, res) => {
@@ -1068,8 +1068,25 @@ app.put('/api/goals', authMiddleware, requireManager, (req, res) => {
   return res.json({ goals: goalsResponse(), renamedLines });
 });
 
+// Deleting hides a report everywhere (lists, goals, points, profiles) but keeps it in the database and backups,
+// marked with who deleted it and when, so a mistake can be undone and nothing disappears without a trace.
+// Managers can delete any report; the person who filed it can delete it until a manager signs it off.
+const canDeleteReport = (user, report) => Boolean(user && report && !report.voided && (isManagerRole(user) || (report.submittedBy === user.id && !report.hodSignedAt)));
+app.delete('/api/reports/:id', authMiddleware, (req, res) => {
+  const viewer = currentUser(req);
+  const report = state.reports.find((entry) => entry.id === req.params.id && !entry.voided);
+  if (!canSeeReport(viewer, report)) return res.status(404).json({ message: 'Report not found.' });
+  if (!canDeleteReport(viewer, report)) return res.status(403).json({ message: report.hodSignedAt ? 'This report has been signed off. Ask a manager to delete it.' : 'You can only delete your own reports.' });
+  report.voided = true;
+  report.voidedAt = new Date().toISOString();
+  report.voidedBy = viewer.id;
+  report.updatedAt = report.voidedAt;
+  saveRow('reports', report);
+  return res.json({ deleted: true });
+});
+
 app.post('/api/reports/:id/sign', authMiddleware, requireManager, (req, res) => {
-  const report = state.reports.find((entry) => entry.id === req.params.id);
+  const report = state.reports.find((entry) => entry.id === req.params.id && !entry.voided);
   if (!report) return res.status(404).json({ message: 'Report not found.' });
   const firstSignature = !report.hodSignedAt;
   report.hodSignature = req.currentUser.name;
@@ -1082,7 +1099,7 @@ app.post('/api/reports/:id/sign', authMiddleware, requireManager, (req, res) => 
 
 app.get('/api/tasks', authMiddleware, (req, res) => {
   const discussions = discussionIndex(req.user.id);
-  const tasks = state.tasks.filter((task) => task.assignedTo === req.user.id || ['manager', 'assistant_manager'].includes(state.users.find((user) => user.id === req.user.id)?.role))
+  const tasks = state.tasks.filter((task) => !task.voided).filter((task) => task.assignedTo === req.user.id || ['manager', 'assistant_manager'].includes(state.users.find((user) => user.id === req.user.id)?.role))
     .map((task) => ({ ...task, discussion: discussions.get(`task:${task.id}`) || null }));
   return res.json({ tasks });
 });
@@ -1092,7 +1109,7 @@ app.get('/api/tasks/:id', authMiddleware, (req, res) => {
   const task = state.tasks.find((entry) => entry.id === req.params.id);
   if (!canSeeTask(viewer, task)) return res.status(404).json({ message: 'Task not found.' });
   const nameOf = (id) => state.users.find((user) => user.id === id)?.name || null;
-  return res.json({ task: { ...task, assigneeName: nameOf(task.assignedTo), assignedByName: nameOf(task.assignedBy), discussion: discussionIndex(req.user.id).get(`task:${task.id}`) || null, canUpdate: isManagerRole(viewer) || task.assignedTo === req.user.id } });
+  return res.json({ task: { ...task, assigneeName: nameOf(task.assignedTo), assignedByName: nameOf(task.assignedBy), discussion: discussionIndex(req.user.id).get(`task:${task.id}`) || null, canUpdate: isManagerRole(viewer) || task.assignedTo === req.user.id, canDelete: isManagerRole(viewer) } });
 });
 
 app.post('/api/tasks', authMiddleware, requireManager, (req, res) => {
@@ -1110,7 +1127,7 @@ app.patch('/api/tasks/:id/status', authMiddleware, (req, res) => {
   if (!['pending', 'in_progress', 'completed'].includes(status)) {
     return res.status(400).json({ message: 'Status must be pending, in_progress or completed.' });
   }
-  const task = state.tasks.find((entry) => entry.id === req.params.id);
+  const task = state.tasks.find((entry) => entry.id === req.params.id && !entry.voided);
   if (!task) return res.status(404).json({ message: 'Task not found.' });
   const isManager = ['manager', 'assistant_manager'].includes(currentUser(req)?.role);
   if (!isManager && task.assignedTo !== req.user.id) {
@@ -1132,6 +1149,20 @@ app.patch('/api/tasks/:id/status', authMiddleware, (req, res) => {
     }
   }
   return res.json({ task });
+});
+
+// Managers can delete a task (staff only start or complete theirs). Like reports, it is hidden everywhere but kept
+// in the database and backups with who deleted it and when. The assignee is told so they stop working on it.
+app.delete('/api/tasks/:id', authMiddleware, requireManager, (req, res) => {
+  const task = state.tasks.find((entry) => entry.id === req.params.id && !entry.voided);
+  if (!task) return res.status(404).json({ message: 'Task not found.' });
+  task.voided = true;
+  task.voidedAt = new Date().toISOString();
+  task.voidedBy = req.user.id;
+  task.updatedAt = task.voidedAt;
+  saveRow('tasks', task);
+  if (task.assignedTo && task.status !== 'completed') notify(task.assignedTo, { type: 'task', fromUserId: req.user.id, title: 'Task cancelled', body: `${task.title} · by ${req.currentUser.name}` });
+  return res.json({ deleted: true });
 });
 
 // ---------- Chat attachments ----------
@@ -1234,7 +1265,7 @@ function canSeeReport(user, report) {
   return Boolean(user && report && !report.voided && (isManagerRole(user) || report.submittedBy === user.id || report.data?.supervisorId === user.id || sharedWith('report', report.id, user.id)));
 }
 function canSeeTask(user, task) {
-  return Boolean(user && task && (isManagerRole(user) || task.assignedTo === user.id || sharedWith('task', task.id, user.id)));
+  return Boolean(user && task && !task.voided && (isManagerRole(user) || task.assignedTo === user.id || sharedWith('task', task.id, user.id)));
 }
 const LINE_LISTS = ['entries', 'trolleys', 'pantries'];
 
@@ -1269,7 +1300,7 @@ function shareView(share) {
     };
   }
   if (share.kind === 'task') {
-    const task = state.tasks.find((entry) => entry.id === share.id);
+    const task = state.tasks.find((entry) => entry.id === share.id && !entry.voided);
     if (!task) return { kind: 'task', id: share.id, missing: true };
     return { kind: 'task', id: task.id, title: task.title, location: task.location, status: task.status, priority: task.priority, dueDate: task.dueDate, assigneeName: state.users.find((user) => user.id === task.assignedTo)?.name || null };
   }
