@@ -976,6 +976,48 @@ app.get('/api/hk-profiles/:name', authMiddleware, requireManager, (req, res) => 
   });
 });
 
+// Overview "Housekeeper performance": who is doing well and who needs support over the last 30 days.
+// A room counts its average score (out of 10), as for HK points. Only roster housekeepers with at least
+// PERFORMANCE_MIN_ROOMS rooms are ranked, so one bad room doesn't put someone on a list. The thresholds match
+// the profiles page: 8+ is performing well, under 7 needs support.
+const PERFORMANCE_DAYS = 30;
+const PERFORMANCE_MIN_ROOMS = 3;
+app.get('/api/hk-performance', authMiddleware, requireManager, (req, res) => {
+  const since = dateInAppZone(-(PERFORMANCE_DAYS - 1));
+  const roster = new Map(currentRoster().map(({ name }) => [nameKey(name), name]));
+  const people = new Map();
+  for (const report of state.reports) {
+    if (report.voided || !HK_POINT_TYPES.includes(report.type) || String(report.date) < since) continue;
+    for (const line of profileLines(report)) {
+      const key = nameKey(line.entry?.hkName);
+      const values = scoreValues(line.entry);
+      if (!roster.has(key) || !values.length) continue;
+      const person = people.get(key) || { name: roster.get(key), rooms: 0, total: 0, lastInspected: '', items: new Map() };
+      person.rooms += 1;
+      person.total += sum(values) / values.length;
+      if (String(report.date) > person.lastInspected) person.lastInspected = String(report.date);
+      for (const item of Object.keys(line.entry.scores || {})) {
+        const value = itemScore(line.entry, item);
+        if (value === null) continue;
+        const label = line.prefix + item;
+        person.items.set(label, [...(person.items.get(label) || []), value]);
+      }
+      people.set(key, person);
+    }
+  }
+  const ranked = [...people.values()].filter((person) => person.rooms >= PERFORMANCE_MIN_ROOMS).map((person) => {
+    // The weakest item (scored at least twice) tells the supervisor what to coach.
+    const weakest = [...person.items.entries()].filter(([, values]) => values.length >= 2).map(([label, values]) => ({ label, average: round1(average(values)) })).sort((a, b) => a.average - b.average)[0] || null;
+    return { name: person.name, rooms: person.rooms, average: round1(person.total / person.rooms), lastInspected: person.lastInspected, weakest };
+  });
+  return res.json({
+    days: PERFORMANCE_DAYS, since, minRooms: PERFORMANCE_MIN_ROOMS, goodAt: STRENGTH_AT, supportBelow: WEAKNESS_BELOW,
+    inspected: people.size, ranked: ranked.length,
+    top: ranked.filter((row) => row.average >= STRENGTH_AT).sort((a, b) => b.average - a.average || b.rooms - a.rooms).slice(0, 5),
+    support: ranked.filter((row) => row.average < WEAKNESS_BELOW).sort((a, b) => a.average - b.average || b.rooms - a.rooms).slice(0, 5)
+  });
+});
+
 // ?year=2026 shows the goals year that started 1 October 2026; anything else shows the current year.
 app.get('/api/goals', authMiddleware, requireManager, (req, res) => {
   const year = Number(req.query.year);

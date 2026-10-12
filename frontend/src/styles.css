@@ -94,6 +94,28 @@ header .kicker { font-size: 18px; color: var(--accent); }
 .metric span, .metric small { display: block; color: var(--slate); font-size: 12px; }
 .metric strong { display: block; font-size: 32px; margin: 15px 0 5px; }
 
+/* Overview housekeeper performance: two lists side by side, each row = name, score bar, average. */
+.performance-panel { margin-top: 18px; }
+.perf-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; margin-top: 6px; }
+.perf-list { display: grid; gap: 6px; align-content: start; min-width: 0; }
+.perf-list h4 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 4px; font-size: 14px; }
+.perf-list h4::before { content: ''; width: 9px; height: 9px; border-radius: 50%; align-self: center; }
+.perf-list h4.good::before { background: var(--green); }
+.perf-list h4.poor::before { background: var(--red); }
+.perf-list h4 small { font-weight: 500; color: var(--slate); font-size: 12px; }
+.perf-row { display: grid; grid-template-columns: minmax(0, 1fr) 90px 34px; align-items: center; gap: 12px; width: 100%; padding: 9px 12px; border-radius: 10px; background: #f7f9f7; text-align: left; color: var(--ink); }
+.perf-row:hover, .perf-row:focus-visible { background: #eef3ef; }
+.perf-name { display: grid; min-width: 0; }
+.perf-name b { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.perf-name small { font-size: 12px; color: var(--slate); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.perf-bar { height: 6px; border-radius: 3px; background: #e5eae6; overflow: hidden; }
+.perf-bar i { display: block; height: 100%; border-radius: 3px; }
+.perf-row.good .perf-bar i { background: var(--green); }
+.perf-row.poor .perf-bar i { background: var(--red); }
+.perf-row strong { font-size: 15px; text-align: right; font-variant-numeric: tabular-nums; }
+.perf-row.good strong { color: var(--green); }
+.perf-row.poor strong { color: var(--red); }
+
 /* Overview stat cards: title on top, figure + change on the left, a 7-day mini chart on the right. */
 .stat-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 30px; }
 .stat-card { display: grid; gap: 14px; align-content: space-between; min-width: 0; padding: 16px 18px; background: #fff; border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 1px 2px rgba(23, 43, 70, .05); }
@@ -617,6 +639,9 @@ summary { cursor: pointer; color: var(--green); font-weight: 700; }
   .heading .primary { white-space: nowrap; }
   .metrics { grid-template-columns: repeat(2, 1fr); }
   .stat-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .perf-columns { grid-template-columns: 1fr; }
+  .perf-row { grid-template-columns: minmax(0, 1fr) 60px 34px; }
+  .perf-name small { white-space: normal; } /* the "weakest" note wraps instead of being cut off */
   .columns, .task-columns, .filters, .form-toolbar, .staff-form, .form-grid, .vehicle { grid-template-columns: 1fr; }
   .score-grid { grid-template-columns: repeat(2, 1fr); }
   .table-head { display: none; }
