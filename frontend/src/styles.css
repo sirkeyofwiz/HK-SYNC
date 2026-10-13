@@ -290,14 +290,18 @@ main:has(> .notice) .chat { height: calc(100vh - 260px); }
 .menu-empty { margin: 6px 8px; font-size: 12px; }
 .chat-toast { position: absolute; left: 50%; bottom: 84px; z-index: 5; transform: translateX(-50%); padding: 7px 14px; border-radius: 16px; background: #1d2926e6; color: #fff; font-size: 12px; }
 .drop-hint { position: absolute; inset: 60px 12px 80px; z-index: 4; display: grid; place-items: center; border-radius: 10px; background: #eef5ffe6; color: var(--accent); font-weight: 800; pointer-events: none; }
-.chat-compose { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); }
+.chat-compose { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px 10px; border-top: 1px solid var(--line); background: #f4f7fa; }
 .compose-row { display: flex; align-items: flex-end; gap: 8px; }
-.compose-row textarea { min-height: 44px; max-height: 140px; resize: none; overflow-y: auto; }
-.icon-btn { display: grid; place-items: center; flex: 0 0 44px; height: 44px; border-radius: 50%; background: #f2f6fb; font-size: 19px; }
-.icon-btn:hover { background: var(--accent-soft); }
-.icon-btn:disabled { opacity: .5; }
-.send-btn { flex: 0 0 auto; height: 44px; }
-.send-btn:disabled { opacity: .6; cursor: default; }
+.compose-box { display: flex; align-items: flex-end; flex: 1; min-width: 0; min-height: 48px; padding: 2px 6px 2px 16px; border: 1px solid var(--line); border-radius: 24px; background: #fff; box-shadow: 0 1px 3px #17232f14; }
+.compose-box:focus-within { border-color: var(--accent); }
+.compose-row .compose-box textarea { flex: 1; min-width: 0; min-height: 42px; max-height: 140px; padding: 11px 4px; border: 0; border-radius: 0; background: transparent; box-shadow: none; outline: none; resize: none; overflow-y: auto; font-size: 15px; line-height: 20px; }
+.box-btn { display: grid; place-items: center; flex: 0 0 40px; height: 42px; padding: 0; background: none; color: var(--slate); }
+.box-btn:hover { color: var(--accent); }
+.chat-icon { width: 22px; height: 22px; }
+.round-btn { display: grid; place-items: center; flex: 0 0 48px; width: 48px; height: 48px; padding: 0; border-radius: 50%; background: var(--accent); color: #fff; box-shadow: 0 2px 6px #17232f33; }
+.round-btn:hover { filter: brightness(1.08); }
+.round-btn:disabled { opacity: .6; cursor: default; }
+.round-btn .chat-icon { width: 24px; height: 24px; }
 .compose-banner { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-left: 3px solid var(--accent); border-radius: 4px; background: #f2f6fb; }
 .compose-banner div { flex: 1; min-width: 0; }
 .compose-banner b, .compose-banner small { display: block; }
@@ -311,8 +315,10 @@ main:has(> .notice) .chat { height: calc(100vh - 260px); }
 .pending-file .att-icon { width: 64px; height: 64px; flex-basis: 64px; }
 .pending-file small { max-width: 76px; overflow: hidden; color: var(--slate); font-size: 10px; white-space: nowrap; text-overflow: ellipsis; }
 .pending-file button { position: absolute; top: -6px; right: 2px; width: 20px; height: 20px; border-radius: 50%; background: var(--ink); color: #fff; font-size: 13px; line-height: 1; }
-.recording-bar { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 13px; font-weight: 700; }
-.recording-bar .text { margin-left: auto; }
+.recording-bar { align-items: center; gap: 8px; padding-left: 4px; font-size: 14px; }
+.recording-bar .box-btn { color: var(--red); }
+.rec-time { font-weight: 700; font-variant-numeric: tabular-nums; }
+.rec-hint { margin-left: auto; padding-right: 10px; color: var(--slate); font-size: 13px; }
 .rec-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--red); animation: rec-pulse 1s infinite; }
 @keyframes rec-pulse { 50% { opacity: .3; } }
 .forward-modal { max-height: 86vh; }
@@ -660,7 +666,7 @@ summary { cursor: pointer; color: var(--green); font-weight: 700; }
   .login-intro { min-height: 42vh; padding: 35px; }
   .login-intro h1 { margin: 12vh 0 15px; }
   .login-form { padding: 40px 28px; }
-  .chat { grid-template-columns: 1fr; height: calc(100vh - 162px); height: calc(100dvh - 162px); }
+  .chat { grid-template-columns: 1fr; height: calc(100vh - 152px); height: calc(100dvh - 162px); }
   main:has(> .notice) .chat { height: calc(100dvh - 224px); }
   .chat.has-active .chat-people, .chat:not(.has-active) .chat-thread { display: none; }
   .chat-back { display: inline; }
@@ -690,6 +696,12 @@ summary { cursor: pointer; color: var(--green); font-weight: 700; }
   .rail nav { flex: 1; flex-direction: row; justify-content: space-around; align-items: stretch; gap: 2px; min-width: 0; height: 100%; }
   .chat { height: calc(100vh - 274px); height: calc(100dvh - 274px); min-height: 320px; }
   main:has(> .notice) .chat { height: calc(100dvh - 336px); }
+  /* An open conversation gets the whole screen: the tab bar hides until you go back to the chat list */
+  body:has(.chat.has-active) { padding-bottom: 0; }
+  main:has(.chat.has-active) { padding-bottom: 10px; }
+  body:has(.chat.has-active) .rail { display: none; }
+  .chat.has-active { height: calc(100vh - 152px); height: calc(100dvh - 152px - env(safe-area-inset-bottom, 0px)); }
+  main:has(> .notice) .chat.has-active { height: calc(100dvh - 214px - env(safe-area-inset-bottom, 0px)); }
   .rail nav button { flex: 1; min-width: 0; padding: 10px 2px 8px; gap: 4px; align-content: end; font-size: 9px; color: #8fa3b8; transition: color .2s; }
   .rail nav button b { display: grid; place-items: center; width: 26px; height: 26px; font-size: 19px; line-height: 1; border-radius: 50%; transition: transform .25s cubic-bezier(.3, 1.4, .5, 1), background .2s, box-shadow .2s; }
   /* The active tab's icon lifts out of the bar into a circle; the page-coloured ring reads as a notch cut into the bar. */
