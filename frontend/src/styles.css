@@ -266,6 +266,12 @@ main:has(> .notice) .chat { height: calc(100vh - 260px); }
 .att-file b, .att-file small { display: block; }
 .att-file b { max-width: 220px; overflow: hidden; font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
 .att-file small { color: var(--slate); font-size: 10px; }
+.att-file { flex-wrap: wrap; }
+.att-file-name { flex: 1 1 130px; min-width: 0; } /* when space is tight, Open/Save wrap onto their own row and the name stays readable */
+.att-file-actions { display: flex; gap: 6px; flex: 1 0 auto; justify-content: flex-end; }
+.att-file-actions button { padding: 6px 10px; border-radius: 7px; background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 700; }
+.att-file-actions button:first-child { background: var(--accent); color: #fff; } /* Open is the main action; Save keeps a copy */
+.att-file-actions button:disabled { opacity: .45; cursor: default; }
 .att-icon { display: grid; place-items: center; flex: 0 0 38px; width: 38px; height: 38px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 9px; font-weight: 800; }
 .att-voice { display: flex; align-items: center; gap: 8px; }
 .att-voice audio { width: 220px; max-width: 100%; height: 36px; }
