@@ -452,6 +452,18 @@ function profileFor(name, { people, team }) {
   };
 }
 
+{
+  let linked = 0;
+  for (const report of state.reports.filter((entry) => entry.type === 'handover' && entry.data && !entry.data.receivedById)) {
+    const receiver = handoverReceiver(report.data, report.submittedBy);
+    if (!receiver) continue;
+    report.data.receivedById = receiver.id;
+    saveRow('reports', report);
+    linked += 1;
+  }
+  if (linked) console.log(`Linked ${linked} earlier shift handover${linked === 1 ? '' : 's'} to the person receiving it.`);
+}
+
 const server = app.listen(process.env.PORT || 5000, () => {
   console.log(`HK SYNC backend running on port ${process.env.PORT || 5000}`);
 });
@@ -515,6 +527,9 @@ function reportSummary(report) {
   const threshold = FLAG_THRESHOLDS[report.type] ?? 6;
   const scores = entries.flatMap(scoreValues);
   const hasBadVehicle = Object.values(report.data?.vehicle || {}).includes('Not OK');
+  // Report-level remarks (handover, vehicle notes) are information, not a problem: a handover is flagged only when
+  // the supervisor ticks "Needs a manager", and a vehicle checklist only when an item is Not OK.
+  const needsManager = report.type === 'handover' && report.data?.needsManager === true;
   const flaggedEntries = entries.filter((entry) => {
     const values = scoreValues(entry);
     const average = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 10;
@@ -523,8 +538,8 @@ function reportSummary(report) {
   return {
     itemCount: entries.length || (report.data?.items ? report.data.items.length : 0),
     average: scores.length ? Number((scores.reduce((sum, value) => sum + value, 0) / scores.length).toFixed(1)) : 0,
-    flagged: Boolean(hasBadVehicle || flaggedEntries.length || report.data?.notes),
-    flaggedCount: flaggedEntries.length + (hasBadVehicle ? 1 : 0)
+    flagged: Boolean(hasBadVehicle || flaggedEntries.length || needsManager),
+    flaggedCount: flaggedEntries.length + (hasBadVehicle ? 1 : 0) + (needsManager ? 1 : 0)
   };
 }
 
@@ -866,7 +881,7 @@ app.get('/api/reports', authMiddleware, (req, res) => {
   const discussions = discussionIndex(req.user.id);
   const reports = state.reports
     .filter((report) => !report.voided)
-    .filter((report) => ['manager', 'assistant_manager'].includes(viewer?.role) || report.submittedBy === req.user.id)
+    .filter((report) => ['manager', 'assistant_manager'].includes(viewer?.role) || report.submittedBy === req.user.id || (report.type === 'handover' && report.data?.receivedById === req.user.id))
     .map((report) => ({
       ...report,
       data: withoutPhotos(report.data),
@@ -886,6 +901,19 @@ app.get('/api/reports/:id', authMiddleware, (req, res) => {
   return res.json({ report: { ...report, submitter: sanitizeUser(state.users.find((user) => user.id === report.submittedBy) || {}), ...reportSummary(report), threshold: FLAG_THRESHOLDS[report.type] ?? 6, discussion: discussionIndex(req.user.id).get(`report:${report.id}`) || null, canManage: isManagerRole(viewer), canDelete: canDeleteReport(viewer, report) } });
 });
 
+// The person a Shift Handover is handed to. Newer apps send their account id; older ones only a typed name,
+// which is linked when it matches exactly one active colleague (full name, or a first name nobody else has).
+function handoverReceiver(data, submitterId) {
+  const colleagues = state.users.filter((user) => user.active !== false && user.id !== submitterId);
+  if (data.receivedById) return colleagues.find((user) => user.id === data.receivedById) || null;
+  const typed = nameKey(data.receivedBy);
+  if (!typed) return null;
+  const exact = colleagues.filter((user) => nameKey(user.name) === typed);
+  if (exact.length === 1) return exact[0];
+  const first = colleagues.filter((user) => nameKey(user.name).split(/\s+/)[0] === typed.split(/\s+/)[0]);
+  return first.length === 1 && typed.split(/\s+/).length === 1 ? first[0] : null;
+}
+
 app.post('/api/reports', authMiddleware, reportJson, (req, res) => {
   const { type, date, data } = req.body || {};
   if (!type || !date || !data) return res.status(400).json({ message: 'Report type, date and data are required.' });
@@ -903,6 +931,14 @@ app.post('/api/reports', authMiddleware, reportJson, (req, res) => {
     if (!evaluated) return res.status(400).json({ message: 'Choose the supervisor being evaluated.' });
     data.supervisorName = evaluated.name;
   }
+  if (type === 'handover') {
+    if (data.receivedById && !handoverReceiver(data, req.user.id)) return res.status(400).json({ message: 'Choose who is receiving the handover.' });
+    const receiver = handoverReceiver(data, req.user.id);
+    if (receiver) { data.receivedById = receiver.id; data.receivedBy = receiver.name; } else delete data.receivedById;
+    if (!String(data.handoverFrom || '').trim()) data.handoverFrom = submitter.name;
+    data.needsManager = data.needsManager === true;
+    if (data.needsManager && !String(data.notes || '').trim()) return res.status(400).json({ message: 'Write in Remarks what the manager needs to know.' });
+  } else { delete data.receivedById; delete data.needsManager; }
   const report = {
     id: randomUUID(), type, date, data, submittedBy: req.user.id,
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), hodSignature: null
@@ -914,8 +950,12 @@ app.post('/api/reports', authMiddleware, reportJson, (req, res) => {
   const place = data.area || data.block || data.vehicleId || '';
   if (summary.flagged) {
     for (const manager of state.users.filter((user) => isManagerRole(user) && user.active !== false)) {
-      notify(manager.id, { type: 'report_flagged', fromUserId: req.user.id, title: `Needs attention · ${label}`, body: `${submitter.name}${summary.flaggedCount ? ` · ${summary.flaggedCount} flagged` : ''}${place ? ` · ${place}` : ''}`, link: { page: 'report', id: report.id } });
+      notify(manager.id, { type: 'report_flagged', fromUserId: req.user.id, title: `Needs attention · ${label}`, body: report.type === 'handover' ? `${submitter.name} · ${String(data.notes).trim()}` : `${submitter.name}${summary.flaggedCount ? ` · ${summary.flaggedCount} flagged` : ''}${place ? ` · ${place}` : ''}`, link: { page: 'report', id: report.id } });
     }
+  }
+  if (report.type === 'handover' && data.receivedById) {
+    const next = [['Rooms to check', data.roomsToCheck], ['Turn-down', data.turndownRooms]].filter(([, value]) => String(value || '').trim()).map(([label, value]) => `${label}: ${String(value).trim()}`).join(' · ');
+    notify(data.receivedById, { type: 'handover', fromUserId: req.user.id, title: 'Shift handover for you', body: `From ${submitter.name}${next ? ` · ${next}` : ''}`, link: { page: 'report', id: report.id } });
   }
   if (report.type === 'inspection_rate' && data.supervisorId) {
     notify(data.supervisorId, { type: 'inspected', fromUserId: req.user.id, title: 'You were inspected', body: `${submitter.name} · ${summary.itemCount} room${summary.itemCount === 1 ? '' : 's'}${place ? ` · ${place}` : ''} · average ${summary.average}/10`, link: { page: 'report', id: report.id } });
@@ -1370,7 +1410,7 @@ function ownMessage(req, res) {
 const isManagerRole = (user) => ['manager', 'assistant_manager'].includes(user?.role);
 const sharedWith = (kind, id, userId) => state.messages.some((message) => !message.deletedAt && message.share?.kind === kind && message.share.id === id && inMessage(message, userId));
 function canSeeReport(user, report) {
-  return Boolean(user && report && !report.voided && (isManagerRole(user) || report.submittedBy === user.id || report.data?.supervisorId === user.id || sharedWith('report', report.id, user.id)));
+  return Boolean(user && report && !report.voided && (isManagerRole(user) || report.submittedBy === user.id || report.data?.supervisorId === user.id || (report.type === 'handover' && report.data?.receivedById === user.id) || sharedWith('report', report.id, user.id)));
 }
 function canSeeTask(user, task) {
   return Boolean(user && task && !task.voided && (isManagerRole(user) || task.assignedTo === user.id || sharedWith('task', task.id, user.id)));
@@ -1440,9 +1480,9 @@ function discussionIndex(userId) {
 // ---------- Notifications ----------
 // Every alert is stored (for the 🔔 list) and pushed to the person's devices unless they have the app open on screen,
 // it's their quiet hours (urgent tasks still come through), or they turned that kind of alert off.
-const NOTIFY_CATEGORY = { message: 'messages', question: 'questions', task: 'tasks', report_signed: 'reportSigned', report_flagged: 'reportFlagged', inspected: 'inspected', reaction: 'reactions' };
+const NOTIFY_CATEGORY = { message: 'messages', question: 'questions', task: 'tasks', report_signed: 'reportSigned', report_flagged: 'reportFlagged', inspected: 'inspected', handover: 'handovers', reaction: 'reactions' };
 const DEFAULT_NOTIFY = {
-  categories: { messages: true, questions: true, tasks: true, reportSigned: true, reportFlagged: true, inspected: true, reactions: false },
+  categories: { messages: true, questions: true, tasks: true, reportSigned: true, reportFlagged: true, inspected: true, handovers: true, reactions: false },
   quietHours: { enabled: true, start: '22:00', end: '06:00' },
   preview: true,
   sound: true
