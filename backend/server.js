@@ -641,8 +641,11 @@ app.get('/api/health', (req, res) => {
 
 // Brute-force protection: count failed sign-ins per account and per client IP in a fixed window.
 // The IP limit is generous because staff on the hotel Wi-Fi share one public address.
-const LOGIN_WINDOW_MS = 15 * 60 * 1000;
-const LOGIN_LIMITS = { account: 5, ip: 50 };
+// Defaults: 5 wrong passwords lock an account and 50 lock a network, for 15 minutes. Railway variables can relax them
+// (e.g. during launch week): LOGIN_MAX_ATTEMPTS, LOGIN_MAX_ATTEMPTS_PER_NETWORK, LOGIN_LOCK_MINUTES.
+const envNumber = (name, fallback) => { const value = Number(process.env[name]); return Number.isInteger(value) && value > 0 ? value : fallback; };
+const LOGIN_WINDOW_MS = envNumber('LOGIN_LOCK_MINUTES', 15) * 60 * 1000;
+const LOGIN_LIMITS = { account: envNumber('LOGIN_MAX_ATTEMPTS', 5), ip: envNumber('LOGIN_MAX_ATTEMPTS_PER_NETWORK', 50) };
 const loginFailures = new Map();
 
 function failuresFor(key) {
@@ -844,6 +847,8 @@ app.post('/api/users/:id/reset-password', authMiddleware, requireManager, async 
   if (!user) return res.status(404).json({ message: 'User not found.' });
   if (!canManageRole(req.currentUser, user.role)) return res.status(403).json({ message: "You cannot reset this account's password." });
   const { resetLink } = issueResetLink(user, 24 * 60 * 60 * 1000);
+  // A manager helping someone who is locked out: clear the lock so they can sign in as soon as they set a new password.
+  loginFailures.delete(`account:${user.email.toLowerCase()}`);
   let emailed = false;
   try {
     emailed = await sendResetEmail(user, resetLink, '24 hours');
