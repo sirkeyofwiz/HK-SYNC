@@ -223,12 +223,15 @@ function supervisorPoints(period) {
     .sort((a, b) => String(a.date).localeCompare(String(b.date)));
   return state.users.filter((user) => user.role === 'supervisor' && user.active !== false).map((supervisor) => {
     let points = 0;
+    let rooms = 0;
     const history = [];
     for (const report of reports.filter((entry) => entry.data?.supervisorId === supervisor.id)) {
-      points += sum(scoredEntries(report).map((entry) => sum(scoreValues(entry))));
+      const totals = scoredEntries(report).map((entry) => scoreValues(entry)).filter((values) => values.length).map(sum);
+      points += sum(totals);
+      rooms += totals.length;
       history.push({ date: report.date, points });
     }
-    return { id: supervisor.id, name: supervisor.name, points, sessions: history.length, history };
+    return { id: supervisor.id, name: supervisor.name, points, sessions: history.length, rooms, roomAverage: rooms ? Number((points / rooms).toFixed(1)) : null, lastInspected: history.at(-1)?.date || null, history };
   });
 }
 
@@ -979,6 +982,106 @@ app.get('/api/hk-profiles/:name', authMiddleware, requireManager, (req, res) => 
     profile: { ...profileFor(name, buildProfiles(period)), onRoster: Boolean(progress), progress: progress?.scores || null, interaction: progress?.interaction || null, points: { points: points?.points || 0, target: goals.targets.hk, deadline: goals.targets.deadline } },
     rules: { minScores: PROFILE_MIN_SCORES, strengthAt: STRENGTH_AT, weaknessBelow: WEAKNESS_BELOW }
   });
+});
+
+// ---------- Supervisor profiles ----------
+// How managers rate each supervisor (Inspection Rate Program: five items per room out of 10, so a room is out of 50),
+// plus the supervisor's own reports and tasks. Strength/weakness rules are the same as for housekeeper profiles.
+const INSPECTION_ITEMS = ['Bathroom', 'Bedroom', 'Balcony', 'Maintenance', 'Presentation Room'];
+const activeSupervisors = () => state.users.filter((user) => user.role === 'supervisor' && user.active !== false);
+const periodStart = (period) => (period === 'all' ? '' : goalPeriod().start);
+
+function buildSupervisorProfile(supervisor, period, points) {
+  const inPeriod = (report) => inProfilePeriod(report, period);
+  const byDate = (a, b) => String(a.date).localeCompare(String(b.date)) || String(a.createdAt).localeCompare(String(b.createdAt));
+  // Ratings from managers, with every supervisor's scores kept as the team comparison.
+  const items = new Map(INSPECTION_ITEMS.map((label) => [label, { mine: [], team: [] }]));
+  const rooms = [];
+  for (const report of state.reports.filter((entry) => entry.type === 'inspection_rate' && inPeriod(entry)).sort(byDate)) {
+    const mine = report.data?.supervisorId === supervisor.id;
+    for (const entry of reportLines(report, 'entries')) {
+      const values = scoreValues(entry);
+      if (!values.length) continue;
+      for (const label of INSPECTION_ITEMS) {
+        const value = itemScore(entry, label);
+        if (value === null) continue;
+        items.get(label).team.push(value);
+        if (mine) items.get(label).mine.push(value);
+      }
+      if (mine) rooms.push({ reportId: report.id, date: report.date, room: entry.room || '', area: report.data?.area || '', total: sum(values), outOf: values.length * 10, average: round1(average(values)), remarks: entry.remarks || '', inspectedBy: userName(report.submittedBy) });
+    }
+  }
+  const itemRows = INSPECTION_ITEMS.map((label) => ({ label, average: round1(average(items.get(label).mine)), count: items.get(label).mine.length, team: round1(average(items.get(label).team)) })).filter((item) => item.count);
+  const rated = itemRows.filter((item) => item.count >= PROFILE_MIN_SCORES);
+  const months = new Map();
+  for (const room of rooms) {
+    const month = String(room.date).slice(0, 7);
+    if (!months.has(month)) months.set(month, []);
+    months.get(month).push(room.average);
+  }
+  // Their own work: reports they filed and the scores they give housekeepers, against all supervisors.
+  const own = state.reports.filter((report) => report.submittedBy === supervisor.id && inPeriod(report)).sort(byDate);
+  const reportCounts = {};
+  for (const report of own) reportCounts[report.type] = (reportCounts[report.type] || 0) + 1;
+  const scoresGiven = (list) => list.filter((report) => HK_POINT_TYPES.includes(report.type)).flatMap((report) => scoredEntries(report)).map(scoreValues).filter((values) => values.length).map(average);
+  const given = scoresGiven(own);
+  const supervisorIds = new Set(state.users.filter((user) => user.role === 'supervisor').map((user) => user.id));
+  const teamGiven = scoresGiven(state.reports.filter((report) => supervisorIds.has(report.submittedBy) && inPeriod(report)));
+  const housekeepers = new Set(own.filter((report) => HK_POINT_TYPES.includes(report.type) || report.type === 'guest_interaction').flatMap((report) => scoredEntries(report)).map((entry) => nameKey(entry.hkName)).filter(Boolean));
+  // Tasks sent to them in the period.
+  const today = appToday();
+  const tasks = state.tasks.filter((task) => !task.voided && task.assignedTo === supervisor.id && String(task.createdAt || '').slice(0, 10) >= periodStart(period));
+  const completed = tasks.filter((task) => task.status === 'completed');
+  return {
+    id: supervisor.id,
+    name: supervisor.name,
+    points: { points: points?.points || 0, target: POINTS_TARGET.supervisor, deadline: goalPeriod().end },
+    rooms: rooms.length,
+    roomAverage: rooms.length ? round1(average(rooms.map((room) => room.total))) : null,
+    average: round1(average(rooms.map((room) => room.average))),
+    lastInspected: rooms.at(-1)?.date || null,
+    strengths: rated.filter((item) => item.average >= STRENGTH_AT).sort((a, b) => b.average - a.average || b.count - a.count).slice(0, 3),
+    weaknesses: rated.filter((item) => item.average < WEAKNESS_BELOW).sort((a, b) => a.average - b.average || b.count - a.count).slice(0, 3),
+    items: itemRows,
+    trend: [...months.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([month, values]) => ({ month, average: round1(average(values)), rooms: values.length })),
+    recent: [...rooms].reverse().slice(0, 10),
+    flagged: rooms.filter((room) => room.average < FLAG_THRESHOLDS.inspection_rate).length,
+    work: {
+      reports: own.length,
+      lastReport: own.at(-1)?.date || null,
+      byType: Object.entries(reportCounts).map(([type, count]) => ({ type, label: REPORT_LABELS[type] || type, count })).sort((a, b) => b.count - a.count),
+      roomsScored: given.length,
+      housekeepers: housekeepers.size,
+      averageGiven: round1(average(given)),
+      teamAverageGiven: round1(average(teamGiven))
+    },
+    tasks: {
+      total: tasks.length,
+      open: tasks.length - completed.length,
+      completed: completed.length,
+      overdue: tasks.filter((task) => task.status !== 'completed' && task.dueDate && task.dueDate < today).length,
+      onTime: completed.filter((task) => task.dueDate && String(task.completedAt || '').slice(0, 10) <= task.dueDate).length,
+      withDueDate: completed.filter((task) => task.dueDate).length
+    }
+  };
+}
+
+app.get('/api/supervisor-profiles', authMiddleware, requireManager, (req, res) => {
+  const period = profilePeriod(req);
+  const points = supervisorPoints(goalPeriod());
+  const profiles = activeSupervisors().map((supervisor) => {
+    const profile = buildSupervisorProfile(supervisor, period, points.find((row) => row.id === supervisor.id));
+    return { id: profile.id, name: profile.name, points: profile.points.points, rooms: profile.rooms, roomAverage: profile.roomAverage, lastInspected: profile.lastInspected, strength: profile.strengths[0] || null, weakness: profile.weaknesses[0] || null, reports: profile.work.reports, openTasks: profile.tasks.open };
+  });
+  return res.json({ period, profiles, target: POINTS_TARGET.supervisor, rules: { minScores: PROFILE_MIN_SCORES, strengthAt: STRENGTH_AT, weaknessBelow: WEAKNESS_BELOW } });
+});
+
+app.get('/api/supervisor-profiles/:id', authMiddleware, requireManager, (req, res) => {
+  const supervisor = state.users.find((user) => user.id === req.params.id && user.role === 'supervisor');
+  if (!supervisor) return res.status(404).json({ message: 'Supervisor not found.' });
+  const period = profilePeriod(req);
+  const points = supervisorPoints(goalPeriod()).find((row) => row.id === supervisor.id);
+  return res.json({ period, profile: { ...buildSupervisorProfile(supervisor, period, points), active: supervisor.active !== false }, rules: { minScores: PROFILE_MIN_SCORES, strengthAt: STRENGTH_AT, weaknessBelow: WEAKNESS_BELOW } });
 });
 
 // Overview "Housekeeper performance": who is doing well and who needs support over the last 30 days.

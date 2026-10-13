@@ -378,7 +378,7 @@ main:has(> .notice) .chat { height: calc(100vh - 260px); }
 .smart-rate small.muted { font-weight: 400; }
 .smart-rate b { font-size: 16px; }
 .goals-section .panel-title small { display: block; margin-top: 4px; font-size: 11px; }
-.cell-label { display: none; color: var(--slate); font-size: 10px; font-weight: 700; }
+.cell-label, .table-row .cell-label { display: none; margin-top: 0; color: var(--slate); font-size: 10px; font-weight: 700; }
 .tag { align-self: start; padding: 2px 6px; border-radius: 10px; font-size: 9px; font-weight: 800; white-space: nowrap; }
 .tag.neutral { background: #eef1f0; color: var(--slate); }
 .tag.warn { background: #fbf0dc; color: #8a5a12; }
@@ -388,9 +388,16 @@ main:has(> .notice) .chat { height: calc(100vh - 260px); }
 .score-grid.three { grid-template-columns: repeat(3, 1fr); }
 .criteria-help { margin: 0 0 4px; padding-left: 18px; color: var(--slate); font-size: 11px; line-height: 1.6; }
 .glance-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
-.glance-stats div { padding: 12px; border-radius: 6px; background: #f7f9f7; }
+.glance-stats > div { padding: 12px; border-radius: 6px; background: #f7f9f7; }
 .glance-stats strong { display: block; font-size: 22px; }
-.glance-stats small { color: var(--slate); font-size: 11px; }
+.glance-stats small { display: block; color: var(--slate); font-size: 11px; }
+.glance-stats .progress { margin: 8px 0 4px; }
+.sup-points { grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 8px; }
+.sup-points .perf-row { grid-template-columns: minmax(0, 1fr) 80px 72px; }
+.sup-points .perf-name small { white-space: normal; }
+.perf-row.goal .perf-bar i { background: linear-gradient(90deg, #5c9de3, var(--accent)); }
+.perf-row.goal strong { color: var(--accent); }
+.perf-row strong small { color: var(--slate); font-size: 11px; font-weight: 500; }
 .glance-goal { display: grid; grid-template-columns: minmax(0, 1fr) 1.2fr; align-items: center; gap: 12px; padding: 7px 0; font-size: 12px; }
 .dash-top, .dash-bottom { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; margin-bottom: 20px; }
 .dash-top .trend { margin-bottom: 0; }
@@ -438,6 +445,9 @@ main:has(> .notice) .chat { height: calc(100vh - 260px); }
 .progress-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }
 .progress-tiles div { display: flex; flex-direction: column; gap: 4px; padding: 10px; border-radius: 6px; background: #f7f9f7; font-size: 11px; color: var(--slate); }
 .progress-tiles b:not(.tag) { color: var(--ink); font-size: 18px; }
+.progress-tiles small { font-size: 10px; }
+.type-counts { display: grid; gap: 4px; margin: 12px 0 8px; padding: 0; list-style: none; font-size: 13px; }
+.type-counts li { display: flex; justify-content: space-between; padding: 6px 10px; border-radius: 6px; background: #f7f9f7; }
 
 /* ---------- Ask about this / report detail ---------- */
 .discussion-chip { margin-left: 6px; padding: 2px 7px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 800; }
@@ -655,6 +665,8 @@ summary { cursor: pointer; color: var(--green); font-weight: 700; }
   .perf-columns { grid-template-columns: 1fr; }
   .perf-row { grid-template-columns: minmax(0, 1fr) 60px 34px; }
   .perf-name small { white-space: normal; } /* the "weakest" note wraps instead of being cut off */
+  .sup-points .perf-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 8px; } /* phones: name and points on top, the bar full width underneath */
+  .sup-points .perf-bar { grid-column: 1 / -1; order: 2; }
   .columns, .task-columns, .filters, .form-toolbar, .staff-form, .form-grid, .vehicle { grid-template-columns: 1fr; }
   .score-grid { grid-template-columns: repeat(2, 1fr); }
   .table-head { display: none; }
@@ -679,7 +691,7 @@ summary { cursor: pointer; color: var(--green); font-weight: 700; }
   .item-row small { grid-column: 1 / -1; }
   .profile-list .table-row { grid-template-columns: 1fr 1fr; }
   .profile-list .table-row > strong { grid-column: 1 / -1; }
-  .cell-label { display: block; }
+  .cell-label, .table-row .cell-label { display: block; }
   .smart-row { grid-template-columns: 1fr 1fr; align-items: end; }
   .smart-row strong, .smart-row .progress, .smart-row > span { grid-column: 1 / -1; }
   .smart-row > span:last-child { text-align: left; }
