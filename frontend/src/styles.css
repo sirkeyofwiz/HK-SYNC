@@ -361,7 +361,7 @@ main:has(> .notice) .chat { height: calc(100vh - 260px); }
 .smart-row .progress, .smart-row > span { align-self: center; }
 .smart-row > span:last-child { font-size: 12px; font-weight: 700; text-align: right; }
 .smart-row .no-target { grid-column: span 2; font-size: 12px; font-weight: 400; text-align: left; }
-.progress-table.hk .table-head, .progress-table.hk .table-row { grid-template-columns: minmax(160px, 1.5fr) repeat(5, 1fr) 28px; gap: 10px; }
+.progress-table.hk .table-head, .progress-table.hk .table-row { grid-template-columns: minmax(160px, 1.5fr) repeat(4, 1fr) 28px; gap: 10px; }
 .name-cell input { font-weight: 700; }
 .remove-row { width: 28px; height: 28px; border-radius: 50%; background: transparent; color: var(--slate); font-size: 18px; line-height: 1; }
 .remove-row:hover { background: #fbe9e8; color: var(--red); }
