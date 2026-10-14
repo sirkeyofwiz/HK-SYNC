@@ -1,4 +1,4 @@
-const CACHE_NAME = 'hk-sync-shell-v4';
+const CACHE_NAME = 'hk-sync-shell-v5';
 const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/logo-mark.webp'];
 
 self.addEventListener('install', (event) => {
@@ -43,14 +43,18 @@ self.addEventListener('push', (event) => {
   } catch {
     data = { body: event.data ? event.data.text() : '' };
   }
-  event.waitUntil(self.registration.showNotification(data.title || 'HK SYNC', {
+  // The number on the app icon, even while the app is closed (where the phone supports it).
+  const count = Number(data.badge);
+  const setBadge = Number.isFinite(count) && self.navigator.setAppBadge ? self.navigator.setAppBadge(count).catch(() => {}) : Promise.resolve();
+  event.waitUntil(Promise.all([setBadge, self.registration.showNotification(data.title || 'HK SYNC', {
     body: data.body || '',
     icon: '/icon-192.png',
-    badge: '/icon-192.png',
+    // Android draws this small icon in the status bar as a white shape, so it must be white on transparent.
+    badge: '/badge-96.png',
     tag: data.tag || data.id,
     renotify: true,
     data: { link: data.link || null }
-  }));
+  })]));
 });
 
 // Tapping a notification focuses HK SYNC (or opens it) on the right chat, task or report.

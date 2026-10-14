@@ -125,8 +125,10 @@ export default function App() {
   const unreadTotal = conversations.reduce((sum, item) => sum + item.unread, 0);
   useEffect(() => { if (page === 'messages' && activeChat) openChat(activeChat); }, [page]);
   // Tell the server whether the app is on screen and which chat is open (decides pop-up vs in-app alert).
-  useEffect(() => { const report = () => socketRef.current?.emit('client-state', { visible: document.visibilityState === 'visible', chatWith: page === 'messages' ? activeChat : null }); report(); document.addEventListener('visibilitychange', report); return () => document.removeEventListener('visibilitychange', report); }, [page, activeChat, token]);
   const unreadAlerts = alerts.filter((item) => !item.readAt).length;
+  useEffect(() => { const report = () => socketRef.current?.emit('client-state', { visible: document.visibilityState === 'visible', chatWith: page === 'messages' ? activeChat : null }); const hide = () => socketRef.current?.emit('client-state', { visible: false, chatWith: null }); report(); const beat = setInterval(() => { if (document.visibilityState === 'visible') report(); }, 20000); document.addEventListener('visibilitychange', report); window.addEventListener('pagehide', hide); document.addEventListener('freeze', hide); return () => { clearInterval(beat); document.removeEventListener('visibilitychange', report); window.removeEventListener('pagehide', hide); document.removeEventListener('freeze', hide); }; }, [page, activeChat, token]);
+  // The number on the app icon follows the unread alerts (Android and iPhone home-screen apps).
+  useEffect(() => { try { if (!token) navigator.clearAppBadge?.()?.catch?.(() => {}); else if (unreadAlerts) navigator.setAppBadge?.(unreadAlerts)?.catch?.(() => {}); else navigator.clearAppBadge?.()?.catch?.(() => {}); } catch { /* not supported */ } }, [unreadAlerts, token]);
   useEffect(() => { document.title = unreadAlerts ? `(${unreadAlerts}) HK SYNC` : 'HK SYNC'; }, [unreadAlerts]);
   useEffect(() => { if (token) checkPush(); }, [token]);
   // A tapped notification either messages this open window, or opens the app with ?open=<link>.

@@ -1511,8 +1511,12 @@ webpush.setVapidDetails(process.env.VAPID_SUBJECT || (APP_URL.startsWith('https:
 
 // The app tells the server whether it's on screen and which chat is open.
 const openSockets = (userId) => [...(onlineUsers.get(userId) || [])].map((id) => io.sockets.sockets.get(id)).filter(Boolean);
-const hasAppOnScreen = (userId) => openSockets(userId).some((socket) => socket.data.visible);
-const isReadingChat = (userId, otherId) => openSockets(userId).some((socket) => socket.data.visible && socket.data.chatWith === otherId);
+// A phone that is locked or switched away often cannot send "hidden" first (the page is frozen, or the network is slow),
+// so "on screen" is trusted only while the app keeps confirming it; the app re-confirms every 20 seconds while visible.
+const PRESENCE_FRESH_MS = Number(process.env.PRESENCE_FRESH_MS) || 45 * 1000;
+const isOnScreen = (socket) => socket.data.visible && Date.now() - (socket.data.seenAt || 0) < PRESENCE_FRESH_MS;
+const hasAppOnScreen = (userId) => openSockets(userId).some(isOnScreen);
+const isReadingChat = (userId, otherId) => openSockets(userId).some((socket) => isOnScreen(socket) && socket.data.chatWith === otherId);
 
 function inQuietHours(settings) {
   if (!settings.quietHours.enabled) return false;
@@ -1522,11 +1526,15 @@ function inQuietHours(settings) {
 }
 
 async function sendPush(userId, notification, onlyEndpoint = null) {
-  const payload = JSON.stringify({ id: notification.id, title: notification.title, body: notification.body, link: notification.link, tag: notification.link ? JSON.stringify(notification.link) : notification.id });
+  const unread = state.notifications.filter((entry) => entry.userId === userId && !entry.readAt).length;
+  const payload = JSON.stringify({ id: notification.id, title: notification.title, body: notification.body, link: notification.link, tag: notification.link ? JSON.stringify(notification.link) : notification.id, badge: unread });
+  // "normal" lets Android hold an alert until the phone is next woken up, which staff see as alerts arriving only when they open the app.
+  // Everything except reactions is something to act on, so it goes at "high".
+  const urgency = notification.type === 'reaction' ? 'normal' : 'high';
   let delivered = 0;
   for (const subscription of state.subscriptions.filter((entry) => entry.userId === userId && (!onlyEndpoint || entry.endpoint === onlyEndpoint))) {
     try {
-      await webpush.sendNotification({ endpoint: subscription.endpoint, keys: subscription.keys }, payload, { TTL: 24 * 60 * 60, urgency: notification.urgent ? 'high' : 'normal' });
+      await webpush.sendNotification({ endpoint: subscription.endpoint, keys: subscription.keys }, payload, { TTL: 24 * 60 * 60, urgency });
       delivered += 1;
     } catch (error) {
       // 404/410 = the browser dropped this registration; forget it.
@@ -1862,6 +1870,7 @@ io.on('connection', (socket) => {
   socket.data.chatWith = null;
   socket.on('client-state', (clientState) => {
     socket.data.visible = Boolean(clientState?.visible);
+    socket.data.seenAt = Date.now();
     socket.data.chatWith = typeof clientState?.chatWith === 'string' ? clientState.chatWith : null;
   });
 
