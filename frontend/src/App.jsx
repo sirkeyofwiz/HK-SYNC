@@ -1,5 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
+import { Capacitor } from '@capacitor/core';
+import { App as NativeApp } from '@capacitor/app';
 
 // VITE_API_URL wins (Railway and Render set it); a trailing "/" or "/api" is tolerated. The fallbacks cover builds without it.
 const API_ORIGIN = (import.meta.env.VITE_API_URL || (import.meta.env.PROD ? 'https://bahari-operations-api-production.up.railway.app' : 'http://localhost:5000')).replace(/\/+$/, '').replace(/\/api$/, '');
@@ -126,6 +128,19 @@ export default function App() {
   useEffect(() => { if (page === 'messages' && activeChat) openChat(activeChat); }, [page]);
   // Tell the server whether the app is on screen and which chat is open (decides pop-up vs in-app alert).
   const unreadAlerts = alerts.filter((item) => !item.readAt).length;
+  // Android back button in the installed app: close whatever is open, step back to the Overview, and from there put the app in the background.
+  const backRef = useRef(null);
+  backRef.current = () => {
+    if (taskDraft) return setTaskDraft(null);
+    if (askFor) return setAskFor(null);
+    if (taskView) return setTaskView(null);
+    if (page === 'messages' && activeChat) return openChat(null);
+    if (page === 'report') return setPage(reportView?.returnTo || 'reports');
+    if (page === 'profile') return setPage(profile?.returnTo || 'people');
+    if (page !== 'overview') { setPage('overview'); window.scrollTo(0, 0); return; }
+    NativeApp.minimizeApp();
+  };
+  useEffect(() => { if (!Capacitor.isNativePlatform()) return undefined; const listener = NativeApp.addListener('backButton', () => backRef.current?.()); return () => { listener.then((handle) => handle.remove()); }; }, []);
   useEffect(() => { const report = () => socketRef.current?.emit('client-state', { visible: document.visibilityState === 'visible', chatWith: page === 'messages' ? activeChat : null }); const hide = () => socketRef.current?.emit('client-state', { visible: false, chatWith: null }); report(); const beat = setInterval(() => { if (document.visibilityState === 'visible') report(); }, 20000); document.addEventListener('visibilitychange', report); window.addEventListener('pagehide', hide); document.addEventListener('freeze', hide); return () => { clearInterval(beat); document.removeEventListener('visibilitychange', report); window.removeEventListener('pagehide', hide); document.removeEventListener('freeze', hide); }; }, [page, activeChat, token]);
   // The number on the app icon follows the unread alerts (Android and iPhone home-screen apps).
   useEffect(() => { try { if (!token) navigator.clearAppBadge?.()?.catch?.(() => {}); else if (unreadAlerts) navigator.setAppBadge?.(unreadAlerts)?.catch?.(() => {}); else navigator.clearAppBadge?.()?.catch?.(() => {}); } catch { /* not supported */ } }, [unreadAlerts, token]);

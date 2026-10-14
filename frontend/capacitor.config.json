@@ -1,0 +1,26 @@
+{
+  "appId": "com.hksync.app",
+  "appName": "HK-SYNC",
+  "webDir": "dist",
+  "android": {
+    "minWebViewVersion": 80,
+    "allowMixedContent": false,
+    "captureInput": true
+  },
+  "server": {
+    "androidScheme": "https",
+    "hostname": "localhost"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 800,
+      "backgroundColor": "#172B46",
+      "showSpinner": false
+    },
+    "StatusBar": {
+      "backgroundColor": "#172B46",
+      "style": "DARK",
+      "overlaysWebView": false
+    }
+  }
+}

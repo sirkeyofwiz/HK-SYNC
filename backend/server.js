@@ -49,7 +49,9 @@ database.exec(`
 const app = express();
 const allowedOrigins = [...new Set([
   ...(process.env.CLIENT_URL || 'http://localhost:5173,http://127.0.0.1:5173').split(',').map((origin) => origin.trim()).filter(Boolean),
-  'https://bahari-operations-web-production.up.railway.app'
+  'https://bahari-operations-web-production.up.railway.app',
+  // The installed Android app (Capacitor serves its bundled files from this address).
+  'https://localhost'
 ])];
 // The API only ever answers the app with JSON or files: forbid framing, sniffing, referrers and caching of private data.
 app.disable('x-powered-by');

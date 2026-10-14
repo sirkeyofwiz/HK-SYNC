@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">HK-SYNC</string>
+    <string name="title_activity_main">HK-SYNC</string>
+    <string name="package_name">com.hksync.app</string>
+    <string name="custom_url_scheme">com.hksync.app</string>
+</resources>
