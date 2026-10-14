@@ -66,6 +66,15 @@ app.use((req, res, next) => {
   if (process.env.NODE_ENV === 'production') res.set('Strict-Transport-Security', 'max-age=31536000');
   next();
 });
+// After any successful change to reports, tasks, goals or staff accounts, tell every open app to reload.
+// The signal carries no data: each app re-reads only what its own user is allowed to see.
+const LIVE_CHANGE = /^\/api\/(reports|tasks|goals|users\/staff|users\/[^/]+\/status)(\/|$)/;
+app.use((req, res, next) => {
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && LIVE_CHANGE.test(req.path)) {
+    res.on('finish', () => { if (res.statusCode < 400) io.emit('data:changed', { area: req.path.split('/')[2] }); });
+  }
+  next();
+});
 app.use(cors({
   origin: allowedOrigins,
   credentials: true,
@@ -1577,7 +1586,10 @@ async function sendPush(userId, notification, onlyDevice = null) {
     deleteRow('subscriptions', subscription.id);
   };
   let delivered = 0;
-  for (const subscription of state.subscriptions.filter((entry) => entry.userId === userId && (!onlyDevice || entry.endpoint === onlyDevice || entry.token === onlyDevice))) {
+  const devices = state.subscriptions.filter((entry) => entry.userId === userId && (!onlyDevice || entry.endpoint === onlyDevice || entry.token === onlyDevice));
+  // One line per alert (no names or text) so missing alerts can be traced in the server log.
+  if (!devices.length) console.log(`Push skipped: no phone registered for user ${String(userId).slice(0, 8)}`);
+  for (const subscription of devices) {
     try {
       if (subscription.kind === 'fcm') {
         if (!FCM) continue;
@@ -1595,6 +1607,7 @@ async function sendPush(userId, notification, onlyDevice = null) {
       }
     }
   }
+  if (devices.length) console.log(`Push: ${delivered} of ${devices.length} device(s) reached for user ${String(userId).slice(0, 8)}`);
   return delivered;
 }
 

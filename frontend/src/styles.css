@@ -781,3 +781,35 @@ main form .manager-flag input, .manager-flag input { width: 20px; min-height: 0;
 .manager-flag small { color: var(--slate); font-size: 12px; font-weight: 500; }
 .manager-flag:has(input:checked) { border-color: var(--red); background: #fbe9e8; }
 .handover-flag { display: inline-block; margin-bottom: 12px; }
+
+/* Daily score by report type (manager Overview). Categorical slots in fixed order; colour follows the report type. */
+.score-trend { --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100; --series-5: #e87ba4; }
+.score-trend .series-1 { --c: var(--series-1); } .score-trend .series-2 { --c: var(--series-2); } .score-trend .series-3 { --c: var(--series-3); } .score-trend .series-4 { --c: var(--series-4); } .score-trend .series-5 { --c: var(--series-5); }
+.trend-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 4px 0 6px; padding: 0; list-style: none; font-size: 12px; color: var(--slate); }
+.trend-legend li { display: flex; align-items: center; gap: 6px; }
+.trend-legend i, .trend-tip i { width: 10px; height: 10px; border-radius: 3px; background: var(--c); flex: none; }
+.trend-legend b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.trend-plot { position: relative; }
+.trend-plot svg { display: block; width: 100%; height: auto; overflow: visible; }
+.trend-grid { stroke: #e7ece8; stroke-width: 1; }
+.trend-axis { fill: var(--slate); font-size: 11px; font-family: inherit; }
+.trend-axis.on { fill: var(--ink); font-weight: 700; }
+.trend-cross { stroke: #b9c4bd; stroke-width: 1; stroke-dasharray: 3 3; }
+.trend-line { fill: none; stroke: var(--c); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.trend-dot { fill: var(--c); stroke: #fff; stroke-width: 2; }
+.trend-hit { fill: transparent; cursor: crosshair; }
+.trend-tip { position: absolute; top: 4px; transform: translateX(12px); display: grid; gap: 4px; min-width: 190px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; box-shadow: 0 6px 18px #17232f1f; font-size: 12px; color: var(--ink); pointer-events: none; z-index: 2; }
+.trend-tip.flip { transform: translateX(calc(-100% - 12px)); }
+.trend-tip span { display: flex; align-items: center; gap: 6px; color: var(--slate); }
+.trend-tip span b { margin-left: auto; color: var(--ink); font-variant-numeric: tabular-nums; }
+.trend-value small { font-size: 12px; }
+
+/* Latest reports: housekeepers on a report, and the handovers listed apart. */
+.report-line .report-line-hk { color: var(--accent); }
+.handover-recent { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); }
+.handover-recent .kicker { margin-bottom: 4px; }
+
+/* Reports: Inspections & checklists / Shift handovers */
+.report-tabs { margin: 0 0 14px; }
+.report-tabs .tab-count { display: inline-block; min-width: 20px; margin-left: 6px; padding: 1px 6px; border-radius: 999px; background: #e9eef3; color: var(--slate); font-size: 11px; font-weight: 700; }
+.report-tabs .active .tab-count { background: var(--accent-soft); color: var(--accent); }
