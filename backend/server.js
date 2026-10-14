@@ -1541,7 +1541,10 @@ async function sendPush(userId, notification, onlyEndpoint = null) {
   // Everything except reactions is something to act on, so it goes at "high".
   const urgency = notification.type === 'reaction' ? 'normal' : 'high';
   let delivered = 0;
-  for (const subscription of state.subscriptions.filter((entry) => entry.userId === userId && (!onlyEndpoint || entry.endpoint === onlyEndpoint))) {
+  const devices = state.subscriptions.filter((entry) => entry.userId === userId && (!onlyEndpoint || entry.endpoint === onlyEndpoint));
+  // One line per alert (no names or text) so missing alerts can be traced in the server log.
+  if (!devices.length) console.log(`Push skipped: no phone registered for user ${String(userId).slice(0, 8)}`);
+  for (const subscription of devices) {
     try {
       await webpush.sendNotification({ endpoint: subscription.endpoint, keys: subscription.keys }, payload, { TTL: 24 * 60 * 60, urgency });
       delivered += 1;
@@ -1555,6 +1558,7 @@ async function sendPush(userId, notification, onlyEndpoint = null) {
       }
     }
   }
+  if (devices.length) console.log(`Push: ${delivered} of ${devices.length} device(s) reached for user ${String(userId).slice(0, 8)}`);
   return delivered;
 }
 
