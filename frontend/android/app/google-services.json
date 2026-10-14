@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "302009028471",
+    "project_id": "hk-sync",
+    "storage_bucket": "hk-sync.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:302009028471:android:824661e500fb481d4b9b72",
+        "android_client_info": {
+          "package_name": "com.hksync.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCeTFSszDSI5-KQDyWyhzePFV6Qw9aCCJY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
