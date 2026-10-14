@@ -64,6 +64,15 @@ app.use((req, res, next) => {
   if (process.env.NODE_ENV === 'production') res.set('Strict-Transport-Security', 'max-age=31536000');
   next();
 });
+// After any successful change to reports, tasks, goals or staff accounts, tell every open app to reload.
+// The signal carries no data: each app re-reads only what its own user is allowed to see.
+const LIVE_CHANGE = /^\/api\/(reports|tasks|goals|users\/staff|users\/[^/]+\/status)(\/|$)/;
+app.use((req, res, next) => {
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && LIVE_CHANGE.test(req.path)) {
+    res.on('finish', () => { if (res.statusCode < 400) io.emit('data:changed', { area: req.path.split('/')[2] }); });
+  }
+  next();
+});
 app.use(cors({
   origin: allowedOrigins,
   credentials: true,

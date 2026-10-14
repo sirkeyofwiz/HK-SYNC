@@ -84,8 +84,15 @@ export default function App() {
   const isManager = ['manager', 'assistant_manager'].includes(user?.role);
   const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
   const request = async (path, options = {}) => { const res = await fetch(`${API}${path}`, { ...options, headers: { ...headers, ...(options.headers || {}) } }); const data = await res.json().catch(() => ({})); if (res.status === 401 && !path.startsWith('/auth/')) { signOut(); setMessage('Your session has ended. Please sign in again.'); } if (!res.ok) throw new Error(data.message || (res.status === 413 ? 'Upload is too large. Try fewer or smaller photos.' : `Request failed (${res.status}).`)); return data; };
-  const refresh = async () => { if (!token) return; try { const manager = ['manager', 'assistant_manager'].includes(user?.role); const [r, t, s, g, h, n, np, perf] = await Promise.all([request('/reports'), request('/tasks'), request('/users/all'), manager ? request(goalsYearRef.current ? `/goals?year=${goalsYearRef.current}` : '/goals') : null, request('/hk-roster'), request('/notifications'), request('/users/me/notify'), manager ? request('/hk-performance') : null]); setReports(r.reports || []); setTasks(t.tasks || []); setStaff(s.users || []); setGoals(g?.goals || null); setPerformance(perf || null); setHkRoster(h.names || []); setAlerts(n.notifications || []); setNotifyPrefs(np.settings || null); } catch (error) { setMessage(error.message); } };
+  const refresh = async () => { if (!token) return; lastRefreshRef.current = Date.now(); try { const manager = ['manager', 'assistant_manager'].includes(user?.role); const [r, t, s, g, h, n, np, perf] = await Promise.all([request('/reports'), request('/tasks'), request('/users/all'), manager ? request(goalsYearRef.current ? `/goals?year=${goalsYearRef.current}` : '/goals') : null, request('/hk-roster'), request('/notifications'), request('/users/me/notify'), manager ? request('/hk-performance') : null]); setReports(r.reports || []); setTasks(t.tasks || []); setStaff(s.users || []); setGoals(g?.goals || null); setPerformance(perf || null); setHkRoster(h.names || []); setAlerts(n.notifications || []); setNotifyPrefs(np.settings || null); } catch (error) { setMessage(error.message); } };
   useEffect(() => { refresh(); }, [token]);
+  // Keep the screens current without a restart: reload when someone else changes reports, tasks or goals (the server says so),
+  // when the app comes back to the screen, and after reconnecting. Bursts are merged into one reload.
+  const refreshRef = useRef(refresh); refreshRef.current = refresh;
+  const lastRefreshRef = useRef(0);
+  const refreshTimerRef = useRef(null);
+  const refreshSoon = (delay = 1200) => { clearTimeout(refreshTimerRef.current); refreshTimerRef.current = setTimeout(() => { lastRefreshRef.current = Date.now(); refreshRef.current(); }, delay); };
+  useEffect(() => { if (!token) return undefined; const back = () => { if (document.visibilityState === 'visible' && Date.now() - lastRefreshRef.current > 20000) refreshSoon(300); }; document.addEventListener('visibilitychange', back); return () => { document.removeEventListener('visibilitychange', back); clearTimeout(refreshTimerRef.current); }; }, [token]);
   useEffect(() => { fetch(`${API}/auth/options`).then((res) => res.json()).then((options) => setEmailReset(Boolean(options.emailReset))).catch(() => setEmailReset(false)); }, []);
   const loadConversations = async () => { try { setConversations((await request('/messages')).conversations || []); } catch { /* shown on the next action */ } };
   const markRead = async (userId) => { try { await request(`/messages/${userId}/read`, { method: 'POST' }); loadConversations(); } catch { /* not critical */ } };
@@ -106,7 +113,8 @@ export default function App() {
     if (!token) return undefined;
     const socket = io(API_ORIGIN, { auth: { token } });
     socketRef.current = socket;
-    socket.on('connect', () => { loadConversations(); socket.emit('client-state', { visible: document.visibilityState === 'visible', chatWith: openChatRef.current }); });
+    socket.on('data:changed', () => refreshSoon());
+    socket.on('connect', () => { if (Date.now() - lastRefreshRef.current > 10000) refreshSoon(500); loadConversations(); socket.emit('client-state', { visible: document.visibilityState === 'visible', chatWith: openChatRef.current }); });
     socket.on('notification', (alert) => { setAlerts((current) => [alert, ...current.filter((item) => item.id !== alert.id)].slice(0, 50)); if (document.visibilityState === 'visible') { setToasts((current) => [...current.slice(-2), alert]); setTimeout(() => setToasts((current) => current.filter((item) => item.id !== alert.id)), 5500); if (notifyPrefsRef.current?.sound !== false) playChime(); } });
     socket.on('notifications:read', ({ ids }) => setAlerts((current) => current.map((item) => ids.includes(item.id) ? { ...item, readAt: item.readAt || new Date().toISOString() } : item)));
     socket.on('new-message', (incoming) => {
