@@ -560,6 +560,9 @@ button.report-line:hover strong { color: var(--accent); }
 .entry-card .photo-picker .photo { margin-left: 0; cursor: pointer; }
 .photo-picker.has-photo .photo { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px 4px 4px; font-weight: 600; }
 .photo-picker .photo img { width: 34px; height: 34px; object-fit: cover; border-radius: 4px; }
+.photo-picker button.photo { font-size: 13px; font-weight: 600; white-space: nowrap; }
+.photo-picker:not(.has-photo) button.photo { padding: 7px 9px; }
+.entry-title h3 { white-space: nowrap; }
 .photo-remove { width: 30px; height: 30px; border-radius: 50%; background: #f6e8e6; color: var(--red, #b42318); font-size: 18px; line-height: 1; padding: 0; }
 .form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
 .score-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 16px 0; }

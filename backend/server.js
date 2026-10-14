@@ -1527,22 +1527,69 @@ function inQuietHours(settings) {
   return start <= end ? now >= start && now < end : now >= start || now < end;
 }
 
-async function sendPush(userId, notification, onlyEndpoint = null) {
+// The Android app gets alerts through Firebase Cloud Messaging. FIREBASE_SERVICE_ACCOUNT holds the Firebase service-account key
+// (the downloaded JSON, or the same base64-encoded); without it the app's alerts are off and only web push is sent.
+const FCM = (() => {
+  const raw = (process.env.FIREBASE_SERVICE_ACCOUNT || '').trim();
+  if (!raw) return null;
+  try {
+    const account = JSON.parse(raw.startsWith('{') ? raw : Buffer.from(raw, 'base64').toString('utf8'));
+    if (account.project_id && account.client_email && account.private_key) return account;
+  } catch { /* reported below */ }
+  console.error('FIREBASE_SERVICE_ACCOUNT is not a valid Firebase service-account key; Android app alerts are off.');
+  return null;
+})();
+let fcmAuth = null;
+async function fcmAccessToken() {
+  if (fcmAuth && fcmAuth.expires > Date.now() + 60 * 1000) return fcmAuth.token;
+  const assertion = jwt.sign({ scope: 'https://www.googleapis.com/auth/firebase.messaging' }, FCM.private_key, { algorithm: 'RS256', issuer: FCM.client_email, audience: 'https://oauth2.googleapis.com/token', expiresIn: '1h' });
+  const res = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion }) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.access_token) throw new Error(`Firebase sign-in failed (${res.status} ${data.error || ''})`.trim());
+  fcmAuth = { token: data.access_token, expires: Date.now() + (Number(data.expires_in) || 3600) * 1000 };
+  return fcmAuth.token;
+}
+// 'sent', or 'gone' when the phone dropped this registration (app removed, data cleared); anything else throws.
+async function sendFcm(token, message) {
+  const res = await fetch(`https://fcm.googleapis.com/v1/projects/${FCM.project_id}/messages:send`, { method: 'POST', headers: { Authorization: `Bearer ${await fcmAccessToken()}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: { token, ...message } }) });
+  if (res.ok) return 'sent';
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 404 || data.error?.details?.some((detail) => detail.errorCode === 'UNREGISTERED')) return 'gone';
+  if (res.status === 401) fcmAuth = null;
+  throw Object.assign(new Error(data.error?.message || `FCM ${res.status}`), { statusCode: res.status });
+}
+
+// onlyDevice: a web push endpoint or an app token, to reach just that one device (test notifications).
+async function sendPush(userId, notification, onlyDevice = null) {
   const unread = state.notifications.filter((entry) => entry.userId === userId && !entry.readAt).length;
-  const payload = JSON.stringify({ id: notification.id, title: notification.title, body: notification.body, link: notification.link, tag: notification.link ? JSON.stringify(notification.link) : notification.id, badge: unread });
+  const tag = notification.link ? JSON.stringify(notification.link) : notification.id;
+  const payload = JSON.stringify({ id: notification.id, title: notification.title, body: notification.body, link: notification.link, tag, badge: unread });
   // "normal" lets Android hold an alert until the phone is next woken up, which staff see as alerts arriving only when they open the app.
   // Everything except reactions is something to act on, so it goes at "high".
   const urgency = notification.type === 'reaction' ? 'normal' : 'high';
+  // Same alert for the Android app: shown by the phone itself (also when the app is closed), grouped by tag like the web version.
+  const fcmMessage = {
+    data: { id: notification.id, link: JSON.stringify(notification.link || null), badge: String(unread) },
+    android: { priority: urgency === 'high' ? 'HIGH' : 'NORMAL', ttl: '86400s', notification: { title: notification.title || 'HK-SYNC', body: notification.body || '', tag, channel_id: 'alerts', notification_count: unread, icon: 'ic_stat_notify', color: '#172B46', default_sound: true, default_vibrate_timings: true } }
+  };
+  const forget = (subscription) => {
+    state.subscriptions = state.subscriptions.filter((entry) => entry.id !== subscription.id);
+    deleteRow('subscriptions', subscription.id);
+  };
   let delivered = 0;
-  for (const subscription of state.subscriptions.filter((entry) => entry.userId === userId && (!onlyEndpoint || entry.endpoint === onlyEndpoint))) {
+  for (const subscription of state.subscriptions.filter((entry) => entry.userId === userId && (!onlyDevice || entry.endpoint === onlyDevice || entry.token === onlyDevice))) {
     try {
-      await webpush.sendNotification({ endpoint: subscription.endpoint, keys: subscription.keys }, payload, { TTL: 24 * 60 * 60, urgency });
+      if (subscription.kind === 'fcm') {
+        if (!FCM) continue;
+        if (await sendFcm(subscription.token, fcmMessage) === 'gone') { forget(subscription); continue; }
+      } else {
+        await webpush.sendNotification({ endpoint: subscription.endpoint, keys: subscription.keys }, payload, { TTL: 24 * 60 * 60, urgency });
+      }
       delivered += 1;
     } catch (error) {
       // 404/410 = the browser dropped this registration; forget it.
-      if ([404, 410].includes(error.statusCode)) {
-        state.subscriptions = state.subscriptions.filter((entry) => entry.id !== subscription.id);
-        deleteRow('subscriptions', subscription.id);
+      if (subscription.kind !== 'fcm' && [404, 410].includes(error.statusCode)) {
+        forget(subscription);
       } else {
         console.error('Push failed:', error.statusCode || error.message);
       }
@@ -1613,6 +1660,17 @@ app.post('/api/notifications/read', authMiddleware, (req, res) => {
 app.get('/api/push/key', authMiddleware, (req, res) => res.json({ publicKey: VAPID.publicKey }));
 
 app.post('/api/push/subscribe', authMiddleware, (req, res) => {
+  // The Android app sends its Firebase device token instead of a web push subscription.
+  if (req.body?.native) {
+    if (!FCM) return res.status(503).json({ message: 'App notifications are not set up on the server yet.' });
+    const token = String(req.body.native.token || '');
+    if (!/^[\w:.-]{20,4096}$/.test(token)) return res.status(400).json({ message: 'This phone did not provide a valid notification registration.' });
+    const id = createHash('sha256').update(`fcm:${token}`).digest('hex');
+    const entry = { id, userId: req.user.id, kind: 'fcm', token, platform: 'android', userAgent: String(req.headers['user-agent'] || '').slice(0, 200), createdAt: new Date().toISOString() };
+    state.subscriptions = [...state.subscriptions.filter((item) => item.id !== id), entry];
+    saveRow('subscriptions', entry);
+    return res.status(201).json({ ok: true, devices: state.subscriptions.filter((item) => item.userId === req.user.id).length });
+  }
   const subscription = req.body?.subscription;
   const endpoint = String(subscription?.endpoint || '');
   // Only real browser push services (Google/Chrome, Mozilla/Firefox, Apple/Safari, Microsoft/Edge): the server posts to this
@@ -1629,7 +1687,7 @@ app.post('/api/push/subscribe', authMiddleware, (req, res) => {
 });
 
 app.post('/api/push/unsubscribe', authMiddleware, (req, res) => {
-  const id = createHash('sha256').update(String(req.body?.endpoint || '')).digest('hex');
+  const id = createHash('sha256').update(req.body?.token ? `fcm:${req.body.token}` : String(req.body?.endpoint || '')).digest('hex');
   const found = state.subscriptions.find((item) => item.id === id && item.userId === req.user.id);
   if (found) {
     state.subscriptions = state.subscriptions.filter((item) => item.id !== id);
@@ -1639,9 +1697,9 @@ app.post('/api/push/unsubscribe', authMiddleware, (req, res) => {
 });
 
 app.post('/api/push/test', authMiddleware, async (req, res) => {
-  const endpoint = req.body?.endpoint || null;
-  if (!state.subscriptions.some((item) => item.userId === req.user.id && (!endpoint || item.endpoint === endpoint))) return res.status(400).json({ message: 'Notifications are not turned on for this device yet.' });
-  const delivered = await sendPush(req.user.id, { id: randomUUID(), title: 'HK SYNC test notification', body: 'Notifications are working on this device. 🎉', link: { page: 'account' }, urgent: true }, endpoint);
+  const device = req.body?.token || req.body?.endpoint || null;
+  if (!state.subscriptions.some((item) => item.userId === req.user.id && (!device || item.endpoint === device || item.token === device))) return res.status(400).json({ message: 'Notifications are not turned on for this device yet.' });
+  const delivered = await sendPush(req.user.id, { id: randomUUID(), title: 'HK SYNC test notification', body: 'Notifications are working on this device. 🎉', link: { page: 'account' }, urgent: true }, device);
   return delivered ? res.json({ ok: true }) : res.status(502).json({ message: 'The notification could not be delivered. Try turning notifications off and on again.' });
 });
 
