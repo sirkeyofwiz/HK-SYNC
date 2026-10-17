@@ -846,3 +846,84 @@ main form .manager-flag input, .manager-flag input { width: 20px; min-height: 0;
 .task-scope button.active { background: var(--accent); color: #fff; }
 .task.task-mine { border-left: 3px solid var(--accent); }
 @media (max-width: 600px) { .heading:has(.task-scope) { flex-wrap: wrap; gap: 12px; } .chat-header .group-info { display: none; } }
+
+/* ---------- Chat screen, WhatsApp style (light) ----------
+   Beige doodle wallpaper, white bubbles for others and light green for yours with a tail on the first of a run,
+   time and ticks inside the bubble, grey top and bottom bars, round green send button. On phones an open chat
+   fills the whole screen. */
+:root {
+  --wa-wall: #efeae2; --wa-bar: #f0f2f5; --wa-in: #ffffff; --wa-out: #d9fdd3; --wa-text: #111b21;
+  --wa-meta: #667781; --wa-green: #00a884; --wa-badge: #25d366; --wa-tick: #53bdeb; --wa-note: #ffeecd;
+}
+.chat-thread.panel { border-radius: 10px; }
+.chat-header { gap: 10px; padding: 8px 14px; border-bottom: 1px solid #e3e6e8; background: var(--wa-bar); }
+.chat-header .avatar { flex: 0 0 40px; width: 40px; height: 40px; }
+.chat-header strong, .chat-title-button strong { color: var(--wa-text); font-size: 16px; font-weight: 600; }
+.chat-header small, .chat-title-button small { color: var(--wa-meta); font-size: 12px; }
+.chat-back, .chat-more { display: grid; place-items: center; flex: 0 0 40px; width: 40px; height: 40px; margin: 0 -4px; padding: 0; border-radius: 50%; background: none; color: #54656f; }
+.chat-back:hover, .chat-more:hover { background: #0000000d; }
+.chat-back .chat-icon, .chat-more .chat-icon { width: 24px; height: 24px; }
+.chat-more { margin-left: auto; }
+.chat-messages {
+  gap: 0; padding: 10px max(12px, 5%) 14px; background-color: var(--wa-wall);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'%3E%3Cg fill='none' stroke='%23000' stroke-opacity='.055' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='22' cy='22' r='7'/%3E%3Cpath d='M27 27l14 14m-5-5l4-4m-1 9l4-4'/%3E%3Cpath d='M104 18l4 9 10 1-7 7 2 10-9-5-9 5 2-10-7-7 10-1z'/%3E%3Crect x='58' y='70' width='34' height='22' rx='6'/%3E%3Cpath d='M66 92l-3 8 10-8'/%3E%3Cpath d='M14 118h40m-40 0v-14m0 6h40v8m-32-8v-6h12v6'/%3E%3Cpath d='M124 104v16m-8-8h16m-26 30l4 4 8-8'/%3E%3Ccircle cx='138' cy='70' r='3'/%3E%3Cpath d='M84 140c6-8 14-8 20 0'/%3E%3C/g%3E%3C/svg%3E");
+}
+.bubble-row { margin-top: 10px; }
+.bubble-row.grouped { margin-top: 2px; }
+.bubble { padding: 6px 8px 6px 9px; border: 0; border-radius: 8px; background: var(--wa-in); color: var(--wa-text); box-shadow: 0 1px .5px #0b141a21; }
+.bubble.mine { border: 0; border-radius: 8px; background: var(--wa-out); }
+.bubble p { color: var(--wa-text); font-size: 14.5px; line-height: 1.35; }
+.bubble-row:not(.grouped) .bubble:not(.deleted) { border-top-left-radius: 0; }
+.bubble-row.mine:not(.grouped) .bubble:not(.deleted) { border-top-left-radius: 8px; border-top-right-radius: 0; }
+.bubble-row:not(.grouped) .bubble:not(.deleted)::before { content: ''; position: absolute; top: 0; left: -8px; width: 8px; height: 13px; background: var(--wa-in); clip-path: polygon(0 0, 100% 0, 100% 100%); }
+.bubble-row.mine:not(.grouped) .bubble:not(.deleted)::before { left: auto; right: -8px; background: var(--wa-out); clip-path: polygon(0 0, 100% 0, 0 100%); }
+.bubble .meta { gap: 3px; margin: 2px 0 -2px 12px; color: var(--wa-meta); font-size: 11px; }
+.bubble .ticks { color: var(--wa-meta); font-size: 12px; }
+.bubble .ticks.read { color: var(--wa-tick); }
+.bubble.deleted { background: #ffffffb3; box-shadow: none; border: 1px dashed #c7cdd1; }
+.bubble .sender { margin-bottom: 2px; font-size: 12.5px; font-weight: 600; }
+.bubble .forwarded { color: var(--wa-meta); font-style: italic; }
+.bubble .quote { border-left: 4px solid var(--wa-green); border-radius: 6px; background: #0b141a0d; }
+.bubble.mine .quote { background: #0b141a12; }
+.bubble .quote b { color: var(--wa-green); }
+.reactions { margin-top: -4px; padding: 0 6px; position: relative; z-index: 1; }
+.reactions button { border: 0; border-radius: 12px; background: #fff; box-shadow: 0 1px 2px #0b141a33; }
+.reactions button.mine { border: 0; background: #e7fce3; }
+.day-separator { margin: 12px 0 4px; }
+.day-separator span { padding: 5px 12px; border-radius: 8px; background: #ffffff; color: #54656f; font-size: 12px; font-weight: 500; box-shadow: 0 1px .5px #0b141a21; }
+.group-note span { padding: 5px 12px; border-radius: 8px; background: var(--wa-note); color: #54656f; font-size: 12px; box-shadow: 0 1px .5px #0b141a1a; }
+.chat-compose { gap: 6px; padding: 6px 8px 8px; border-top: 0; background: var(--wa-bar); }
+.compose-box { min-height: 46px; border: 0; border-radius: 24px; box-shadow: none; }
+.compose-box:focus-within { border: 0; box-shadow: 0 0 0 1px #d1d7db; }
+.box-btn { color: #54656f; }
+.box-btn:hover { color: var(--wa-green); }
+.round-btn { flex-basis: 46px; width: 46px; height: 46px; background: var(--wa-green); box-shadow: none; }
+.compose-banner { border-left-color: var(--wa-green); border-radius: 8px; background: #fff; }
+.compose-banner b { color: var(--wa-green); }
+.chat-header small.typing, .chat-title-button small.typing, .chat-person-text small.typing { color: var(--wa-green); }
+
+/* Chat list: name and last message on the left, time and green unread count on the right. */
+.chat-person { gap: 12px; padding: 10px 8px; border-radius: 8px; }
+.chat-person:hover, .chat-person.active { background: var(--wa-bar); }
+.chat-person-text strong { color: var(--wa-text); font-size: 15px; font-weight: 600; }
+.chat-person-text small { color: var(--wa-meta); font-size: 13px; }
+.chat-person .avatar { flex: 0 0 44px; width: 44px; height: 44px; font-size: 13px; }
+.chat-side { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex: none; align-self: stretch; padding-top: 2px; }
+.chat-side time { color: var(--wa-meta); font-size: 11.5px; white-space: nowrap; }
+.chat-side.has-unread time { color: var(--wa-badge); font-weight: 700; }
+.chat-side .unread { min-width: 20px; padding: 2px 6px; border-radius: 10px; background: var(--wa-badge); color: #fff; font-size: 11.5px; font-weight: 700; line-height: 16px; }
+
+/* Phones: an open chat takes the whole screen, top bar to bottom bar, like WhatsApp. */
+@media (max-width: 600px) {
+  body:has(.chat.has-active) { overflow: hidden; }
+  .chat.has-active .chat-thread { position: fixed; inset: 0; z-index: 30; height: auto; margin: 0; border: 0; border-radius: 0; box-shadow: none; }
+  .chat.has-active .chat-header { padding-top: calc(8px + env(safe-area-inset-top, 0px)); padding-left: max(8px, env(safe-area-inset-left, 0px)); padding-right: max(8px, env(safe-area-inset-right, 0px)); }
+  .chat.has-active .chat-compose { padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
+  .chat-messages { padding-left: 10px; padding-right: 10px; }
+  .bubble { max-width: 82%; }
+}
+/* Dialogs opened from a chat (group info, forward, message menu) sit above the full-screen chat. */
+.chat .backdrop { z-index: 40; }
+.chat .msg-menu { z-index: 41; }
+/* Wide screens show the chat list beside the conversation, so there is nothing to go back to. */
+@media (min-width: 1101px) { .chat-back { display: none; } }
