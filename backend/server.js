@@ -45,6 +45,7 @@ database.exec(`
   CREATE TABLE IF NOT EXISTS settings (id TEXT PRIMARY KEY, data TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, data TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS subscriptions (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS chat_groups (id TEXT PRIMARY KEY, data TEXT NOT NULL);
 `);
 const app = express();
 const allowedOrigins = [...new Set([
@@ -108,7 +109,7 @@ app.set('trust proxy', 1);
 const isPlainObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 // A report's line list (entries / trolleys / pantries), skipping anything that isn't a proper line.
 const reportLines = (report, key) => (Array.isArray(report?.data?.[key]) ? report.data[key].filter(isPlainObject) : []);
-const DEFAULT_STATE = { users: [], messages: [], reports: [], tasks: [], goals: [], attachments: [], settings: [], notifications: [], subscriptions: [] };
+const DEFAULT_STATE = { users: [], messages: [], reports: [], tasks: [], goals: [], attachments: [], settings: [], notifications: [], subscriptions: [], chatGroups: [] };
 if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
   throw new Error('JWT_SECRET must be configured in production.');
 }
@@ -125,7 +126,7 @@ const roleReportTypes = {
 };
 
 function readState() {
-  const tableCounts = ['users', 'messages', 'reports', 'tasks', 'goals', 'attachments', 'settings', 'notifications', 'subscriptions'].map((table) => database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count);
+  const tableCounts = ['users', 'messages', 'reports', 'tasks', 'goals', 'attachments', 'settings', 'notifications', 'subscriptions', 'chat_groups'].map((table) => database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count);
   if (tableCounts.every((count) => count === 0) && fs.existsSync(dataFilePath)) {
     const legacyState = JSON.parse(fs.readFileSync(dataFilePath, 'utf8'));
     const importState = database.transaction(() => {
@@ -138,12 +139,12 @@ function readState() {
     importState();
   }
   const load = (table) => database.prepare(`SELECT data FROM ${table}`).all().map((row) => JSON.parse(row.data));
-  return { users: load('users'), messages: load('messages'), reports: load('reports'), tasks: load('tasks'), goals: load('goals'), attachments: load('attachments'), settings: load('settings'), notifications: load('notifications'), subscriptions: load('subscriptions') };
+  return { users: load('users'), messages: load('messages'), reports: load('reports'), tasks: load('tasks'), goals: load('goals'), attachments: load('attachments'), settings: load('settings'), notifications: load('notifications'), subscriptions: load('subscriptions'), chatGroups: load('chat_groups') };
 }
 
 let state = readState();
 
-const upsertStatements = Object.fromEntries(['users', 'messages', 'reports', 'tasks', 'goals', 'attachments', 'settings', 'notifications', 'subscriptions'].map((table) => [table, database.prepare(`INSERT OR REPLACE INTO ${table} (id, data) VALUES (?, ?)`)]));
+const upsertStatements = Object.fromEntries(['users', 'messages', 'reports', 'tasks', 'goals', 'attachments', 'settings', 'notifications', 'subscriptions', 'chat_groups'].map((table) => [table, database.prepare(`INSERT OR REPLACE INTO ${table} (id, data) VALUES (?, ?)`)]));
 
 // Persist only the row that changed; rewriting whole tables on every update gets slow as reports and photos accumulate.
 function saveRow(table, row) {
@@ -572,10 +573,14 @@ function buildMessageEntry(message) {
   return {
     id: message.id,
     senderId: message.senderId,
-    receiverId: message.receiverId,
+    receiverId: message.receiverId || null,
+    groupId: message.groupId || null,
+    system: Boolean(message.system),
     text: deleted ? '' : message.text,
     createdAt: message.createdAt,
-    read: Boolean(message.read),
+    // In a group, "read" means every other current member has read it; seenBy counts them for "Seen by 3".
+    read: message.groupId ? groupReadByAll(message) : Boolean(message.read),
+    seenBy: message.groupId ? (message.readBy || []).filter((id) => id !== message.senderId && isGroupMember(groupById(message.groupId), id)).length : null,
     editedAt: message.editedAt || null,
     deleted,
     attachments: deleted ? [] : (message.attachments || []).map(attachmentView).filter(Boolean),
@@ -892,7 +897,8 @@ app.get('/api/reports', authMiddleware, (req, res) => {
   const discussions = discussionIndex(req.user.id);
   const reports = state.reports
     .filter((report) => !report.voided)
-    .filter((report) => ['manager', 'assistant_manager'].includes(viewer?.role) || report.submittedBy === req.user.id || (report.type === 'handover' && report.data?.receivedById === req.user.id))
+    // Every supervisor sees every shift handover, so whoever comes on shift knows what is going on.
+    .filter((report) => ['manager', 'assistant_manager'].includes(viewer?.role) || report.submittedBy === req.user.id || (report.type === 'handover' && (report.data?.receivedById === req.user.id || viewer?.role === 'supervisor')))
     .map((report) => ({
       ...report,
       data: withoutPhotos(report.data),
@@ -1258,7 +1264,8 @@ app.post('/api/reports/:id/sign', authMiddleware, requireManager, (req, res) => 
 
 app.get('/api/tasks', authMiddleware, (req, res) => {
   const discussions = discussionIndex(req.user.id);
-  const tasks = state.tasks.filter((task) => !task.voided).filter((task) => task.assignedTo === req.user.id || ['manager', 'assistant_manager'].includes(state.users.find((user) => user.id === req.user.id)?.role))
+  const viewer = currentUser(req);
+  const tasks = state.tasks.filter((task) => canUpdateTask(viewer, task))
     .map((task) => ({ ...task, discussion: discussions.get(`task:${task.id}`) || null }));
   return res.json({ tasks });
 });
@@ -1268,7 +1275,7 @@ app.get('/api/tasks/:id', authMiddleware, (req, res) => {
   const task = state.tasks.find((entry) => entry.id === req.params.id);
   if (!canSeeTask(viewer, task)) return res.status(404).json({ message: 'Task not found.' });
   const nameOf = (id) => state.users.find((user) => user.id === id)?.name || null;
-  return res.json({ task: { ...task, assigneeName: nameOf(task.assignedTo), assignedByName: nameOf(task.assignedBy), discussion: discussionIndex(req.user.id).get(`task:${task.id}`) || null, canUpdate: isManagerRole(viewer) || task.assignedTo === req.user.id, canDelete: isManagerRole(viewer) } });
+  return res.json({ task: { ...task, assigneeName: nameOf(task.assignedTo), assignedByName: nameOf(task.assignedBy), discussion: discussionIndex(req.user.id).get(`task:${task.id}`) || null, canUpdate: canUpdateTask(viewer, task), canDelete: isManagerRole(viewer) } });
 });
 
 app.post('/api/tasks', authMiddleware, requireManager, (req, res) => {
@@ -1288,20 +1295,26 @@ app.patch('/api/tasks/:id/status', authMiddleware, (req, res) => {
   }
   const task = state.tasks.find((entry) => entry.id === req.params.id && !entry.voided);
   if (!task) return res.status(404).json({ message: 'Task not found.' });
-  const isManager = ['manager', 'assistant_manager'].includes(currentUser(req)?.role);
-  if (!isManager && task.assignedTo !== req.user.id) {
-    return res.status(403).json({ message: 'Only the assigned staff member or a manager can update this task.' });
+  if (!canUpdateTask(currentUser(req), task)) {
+    return res.status(403).json({ message: 'Only the assigned staff member, another supervisor or a manager can update this task.' });
   }
   const previous = task.status;
   task.status = status;
   task.updatedAt = new Date().toISOString();
   task.completedAt = status === 'completed' ? task.updatedAt : null;
+  task.updatedBy = req.user.id;
   saveRow('tasks', task);
   if (previous !== status) {
     const actor = userName(req.user.id);
     const link = { page: 'task', id: task.id };
     // The assignee's progress goes to whoever created the task; a manager's change goes to the assignee.
-    if (req.user.id === task.assignedTo) {
+    const covering = req.user.id !== task.assignedTo && supervisorsTask(currentUser(req), task);
+    if (covering) {
+      // A supervisor covering a colleague's task: tell the colleague and whoever created the task.
+      const verb = { completed: 'completed', in_progress: 'started', pending: 'moved back to pending' }[status];
+      notify(task.assignedTo, { type: 'task', fromUserId: req.user.id, title: `${actor} ${verb} your task`, body: task.title, link });
+      if (task.assignedBy !== task.assignedTo) notify(task.assignedBy, { type: 'task', fromUserId: req.user.id, title: `${actor} ${verb} a task for ${userName(task.assignedTo)}`, body: task.title, link });
+    } else if (req.user.id === task.assignedTo) {
       notify(task.assignedBy, { type: 'task', fromUserId: req.user.id, title: `${actor} ${{ completed: 'completed', in_progress: 'started', pending: 'moved back to pending' }[status]}`, body: task.title, link });
     } else if (task.assignedTo) {
       notify(task.assignedTo, { type: 'task', fromUserId: req.user.id, title: previous === 'completed' ? 'Task reopened' : status === 'completed' ? 'Task marked completed' : status === 'in_progress' ? 'Task in progress' : 'Task moved back to pending', body: `${task.title} · by ${actor}`, link });
@@ -1337,7 +1350,16 @@ const ATTACHMENT_KINDS = {
 };
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 const uploadPath = (id) => path.join(UPLOAD_DIR, id);
-const inMessage = (message, userId) => message.senderId === userId || message.receiverId === userId;
+// ---------- Chat groups ----------
+// A group is a named list of members; its messages carry groupId instead of receiverId. Current members read the
+// whole history; someone removed from a group loses access to it, its files and anything shared in it.
+const groupById = (id) => (typeof id === 'string' ? state.chatGroups.find((group) => group.id === id && !group.deletedAt) || null : null);
+const isGroupMember = (group, userId) => Boolean(group?.members?.includes(userId));
+const groupReadByAll = (message) => {
+  const others = (groupById(message.groupId)?.members || []).filter((id) => id !== message.senderId);
+  return others.length > 0 && others.every((id) => message.readBy?.includes(id));
+};
+const inMessage = (message, userId) => (message.groupId ? isGroupMember(groupById(message.groupId), userId) : message.senderId === userId || message.receiverId === userId);
 const messagesUsing = (attachmentId) => state.messages.filter((message) => !message.deletedAt && message.attachments?.includes(attachmentId));
 
 function canOpenAttachment(attachment, userId) {
@@ -1398,14 +1420,14 @@ app.get('/api/attachments/:id', authMiddleware, (req, res) => {
 
 function emitMessage(event, message) {
   const payload = buildMessageEntry(message);
-  io.to(message.receiverId).emit(event, payload);
-  io.to(message.senderId).emit(event, payload);
+  const targets = message.groupId ? groupById(message.groupId)?.members || [] : [message.receiverId];
+  for (const id of new Set([...targets, message.senderId])) io.to(id).emit(event, payload);
   return payload;
 }
 
 function ownMessage(req, res) {
   const message = state.messages.find((entry) => entry.id === req.params.id);
-  if (!message || message.senderId !== req.user.id) {
+  if (!message || message.senderId !== req.user.id || message.system || !inMessage(message, req.user.id)) {
     res.status(404).json({ message: 'Message not found.' });
     return null;
   }
@@ -1421,10 +1443,13 @@ function ownMessage(req, res) {
 const isManagerRole = (user) => ['manager', 'assistant_manager'].includes(user?.role);
 const sharedWith = (kind, id, userId) => state.messages.some((message) => !message.deletedAt && message.share?.kind === kind && message.share.id === id && inMessage(message, userId));
 function canSeeReport(user, report) {
-  return Boolean(user && report && !report.voided && (isManagerRole(user) || report.submittedBy === user.id || report.data?.supervisorId === user.id || (report.type === 'handover' && report.data?.receivedById === user.id) || sharedWith('report', report.id, user.id)));
+  return Boolean(user && report && !report.voided && (isManagerRole(user) || (user.role === 'supervisor' && report.type === 'handover') || report.submittedBy === user.id || report.data?.supervisorId === user.id || (report.type === 'handover' && report.data?.receivedById === user.id) || sharedWith('report', report.id, user.id)));
 }
+// Supervisors see and update every supervisor's tasks, so whoever is on shift can pick up a colleague's work.
+const supervisorsTask = (user, task) => user?.role === 'supervisor' && state.users.find((entry) => entry.id === task?.assignedTo)?.role === 'supervisor';
+const canUpdateTask = (user, task) => Boolean(user && task && !task.voided && (isManagerRole(user) || task.assignedTo === user.id || supervisorsTask(user, task)));
 function canSeeTask(user, task) {
-  return Boolean(user && task && !task.voided && (isManagerRole(user) || task.assignedTo === user.id || sharedWith('task', task.id, user.id)));
+  return Boolean(user && task && !task.voided && (canUpdateTask(user, task) || sharedWith('task', task.id, user.id)));
 }
 const LINE_LISTS = ['entries', 'trolleys', 'pantries'];
 
@@ -1475,13 +1500,13 @@ function discussionIndex(userId) {
     const entry = index.get(key) || { count: 0, lastAt: '', withUserId: null, sharedBy: null, sharedAt: '' };
     entry.count += 1;
     // The latest person who sent *you* this item: the natural person to ask back.
-    if (message.receiverId === userId && String(message.createdAt) > entry.sharedAt) {
+    if ((message.groupId ? message.senderId !== userId : message.receiverId === userId) && String(message.createdAt) > entry.sharedAt) {
       entry.sharedAt = String(message.createdAt);
       entry.sharedBy = message.senderId;
     }
     if (String(message.createdAt) > entry.lastAt) {
       entry.lastAt = String(message.createdAt);
-      entry.withUserId = message.senderId === userId ? message.receiverId : message.senderId;
+      entry.withUserId = message.groupId || (message.senderId === userId ? message.receiverId : message.senderId);
     }
     index.set(key, entry);
   }
@@ -1611,13 +1636,13 @@ async function sendPush(userId, notification, onlyDevice = null) {
   return delivered;
 }
 
-function notify(userId, { type, title, body = '', link = null, urgent = false, fromUserId = null }) {
+function notify(userId, { type, title, body = '', link = null, urgent = false, fromUserId = null, chat = null }) {
   const user = state.users.find((entry) => entry.id === userId && entry.active !== false);
   if (!user || userId === fromUserId) return null;
   const settings = notifySettings(user);
   if (NOTIFY_CATEGORY[type] && settings.categories[NOTIFY_CATEGORY[type]] === false) return null;
   // Nothing to tell someone who is reading that very conversation.
-  if ((type === 'message' || type === 'question') && fromUserId && isReadingChat(userId, fromUserId)) return null;
+  if ((type === 'message' || type === 'question') && (chat || fromUserId) && isReadingChat(userId, chat || fromUserId)) return null;
   const notification = { id: randomUUID(), userId, type, title: String(title).slice(0, 120), body: String(body || '').slice(0, 240), link, urgent: Boolean(urgent), createdAt: new Date().toISOString(), readAt: null };
   state.notifications.push(notification);
   saveRow('notifications', notification);
@@ -1738,7 +1763,15 @@ app.put('/api/users/me/notify', authMiddleware, (req, res) => {
 // One summary per person you have messaged: last message and how many of theirs you haven't read.
 app.get('/api/messages', authMiddleware, (req, res) => {
   const summaries = new Map();
+  const groups = new Map(state.chatGroups.filter((group) => !group.deletedAt && group.members.includes(req.user.id)).map((group) => [group.id, { ...groupView(group, req.user.id), lastMessage: null, unread: 0 }]));
   for (const msg of state.messages) {
+    if (msg.groupId) {
+      const summary = groups.get(msg.groupId);
+      if (!summary) continue;
+      if (!summary.lastMessage || new Date(msg.createdAt) > new Date(summary.lastMessage.createdAt)) summary.lastMessage = buildMessageEntry(msg);
+      if (!msg.system && !msg.deletedAt && msg.senderId !== req.user.id && !msg.readBy?.includes(req.user.id)) summary.unread += 1;
+      continue;
+    }
     if (msg.senderId !== req.user.id && msg.receiverId !== req.user.id) continue;
     const otherId = msg.senderId === req.user.id ? msg.receiverId : msg.senderId;
     const summary = summaries.get(otherId) || { userId: otherId, lastMessage: null, unread: 0 };
@@ -1746,10 +1779,27 @@ app.get('/api/messages', authMiddleware, (req, res) => {
     if (msg.receiverId === req.user.id && !msg.read) summary.unread += 1;
     summaries.set(otherId, summary);
   }
-  return res.json({ conversations: [...summaries.values()] });
+  return res.json({ conversations: [...summaries.values()], groups: [...groups.values()] });
 });
 
 app.post('/api/messages/:userId/read', authMiddleware, (req, res) => {
+  const group = groupById(req.params.userId);
+  if (group) {
+    if (!isGroupMember(group, req.user.id)) return res.status(404).json({ message: 'Group not found.' });
+    let marked = 0;
+    for (const msg of state.messages) {
+      if (msg.groupId !== group.id || msg.senderId === req.user.id || msg.readBy?.includes(req.user.id)) continue;
+      msg.readBy = [...(msg.readBy || []), req.user.id];
+      saveRow('messages', msg);
+      marked += 1;
+    }
+    markNotificationsRead(req.user.id, (entry) => entry.link?.page === 'messages' && entry.link.groupId === group.id);
+    if (marked) {
+      io.to(req.user.id).emit('messages:read', { groupId: group.id });
+      for (const id of group.members) if (id !== req.user.id) io.to(id).emit('group:read', { groupId: group.id, by: req.user.id });
+    }
+    return res.json({ updated: marked });
+  }
   let updated = 0;
   for (const msg of state.messages) {
     if (msg.senderId === req.params.userId && msg.receiverId === req.user.id && !msg.read) {
@@ -1768,6 +1818,12 @@ app.post('/api/messages/:userId/read', authMiddleware, (req, res) => {
 
 app.get('/api/messages/:userId', authMiddleware, (req, res) => {
   const withUserId = req.params.userId;
+  const group = groupById(withUserId);
+  if (group) {
+    if (!isGroupMember(group, req.user.id)) return res.status(404).json({ message: 'Group not found.' });
+    const messages = state.messages.filter((msg) => msg.groupId === group.id).map(buildMessageEntry).sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+    return res.json({ messages, group: groupView(group, req.user.id) });
+  }
   const messages = state.messages
     .filter((msg) =>
       (msg.senderId === req.user.id && msg.receiverId === withUserId) ||
@@ -1809,7 +1865,18 @@ app.post('/api/messages', authMiddleware, (req, res) => {
       return res.status(400).json({ message: 'Only reports and tasks can be shared.' });
     }
   }
+  const group = groupById(receiverId);
+  if (group && !isGroupMember(group, req.user.id)) return res.status(404).json({ message: 'Group not found.' });
+  if (String(text || '').trim().length > 2000) return res.status(400).json({ message: 'Messages can be at most 2000 characters.' });
   const repliedTo = replyTo ? state.messages.find((entry) => entry.id === replyTo) : null;
+  if (group) {
+    if (replyTo && (!repliedTo || repliedTo.groupId !== group.id)) return res.status(400).json({ message: 'You can only reply to a message in this conversation.' });
+    const groupMessage = { id: randomUUID(), groupId: group.id, senderId: req.user.id, receiverId: null, text: String(text || '').trim(), attachments: attachmentIds, replyTo: repliedTo?.id || null, share: cleanShare, reactions: {}, createdAt: new Date().toISOString(), readBy: [req.user.id] };
+    state.messages.push(groupMessage);
+    saveRow('messages', groupMessage);
+    notifyGroup(group, groupMessage);
+    return res.status(201).json({ message: emitMessage('new-message', groupMessage) });
+  }
   if (replyTo && (!repliedTo || !inMessage(repliedTo, req.user.id) || !inMessage(repliedTo, receiverId))) {
     return res.status(400).json({ message: 'You can only reply to a message in this conversation.' });
   }
@@ -1852,9 +1919,17 @@ app.post('/api/messages/forward', authMiddleware, (req, res) => {
   const original = state.messages.find((entry) => entry.id === req.body?.messageId);
   if (!original || original.deletedAt || !inMessage(original, req.user.id)) return res.status(404).json({ message: 'Message not found.' });
   const receiverIds = Array.isArray(req.body?.receiverIds) ? [...new Set(req.body.receiverIds)].slice(0, 20) : [];
-  const receivers = receiverIds.map((id) => state.users.find((user) => user.id === id && user.active !== false && user.id !== req.user.id));
-  if (!receivers.length || receivers.some((user) => !user)) return res.status(400).json({ message: 'Choose who to forward it to.' });
+  const targetGroups = receiverIds.map(groupById).filter((group) => isGroupMember(group, req.user.id));
+  const receivers = receiverIds.filter((id) => !targetGroups.some((group) => group.id === id)).map((id) => state.users.find((user) => user.id === id && user.active !== false && user.id !== req.user.id));
+  if ((!receivers.length && !targetGroups.length) || receivers.some((user) => !user)) return res.status(400).json({ message: 'Choose who to forward it to.' });
   const author = original.forwardedFrom || { senderId: original.senderId, name: state.users.find((user) => user.id === original.senderId)?.name || 'Unknown' };
+  const toGroups = targetGroups.map((group) => {
+    const message = { id: randomUUID(), groupId: group.id, senderId: req.user.id, receiverId: null, text: original.text, attachments: [...(original.attachments || [])], share: original.share || null, replyTo: null, forwardedFrom: author, reactions: {}, createdAt: new Date().toISOString(), readBy: [req.user.id] };
+    state.messages.push(message);
+    saveRow('messages', message);
+    notifyGroup(group, message, 'Forwarded: ');
+    return emitMessage('new-message', message);
+  });
   const sent = receivers.map((receiver) => {
     const message = { id: randomUUID(), senderId: req.user.id, receiverId: receiver.id, text: original.text, attachments: [...(original.attachments || [])], share: original.share || null, replyTo: null, forwardedFrom: author, reactions: {}, createdAt: new Date().toISOString(), read: false };
     state.messages.push(message);
@@ -1862,7 +1937,7 @@ app.post('/api/messages/forward', authMiddleware, (req, res) => {
     notify(receiver.id, { type: 'message', fromUserId: req.user.id, title: userName(req.user.id), body: `Forwarded: ${messageSummary(message)}`, link: { page: 'messages', userId: req.user.id } });
     return emitMessage('new-message', message);
   });
-  return res.status(201).json({ messages: sent });
+  return res.status(201).json({ messages: [...sent, ...toGroups] });
 });
 
 app.patch('/api/messages/:id', authMiddleware, (req, res) => {
@@ -1912,8 +1987,92 @@ app.post('/api/messages/:id/reactions', authMiddleware, (req, res) => {
   if (!had) reactions[emoji] = [...(reactions[emoji] || []), req.user.id];
   message.reactions = reactions;
   saveRow('messages', message);
-  if (!had) notify(message.senderId, { type: 'reaction', fromUserId: req.user.id, title: `${userName(req.user.id)} reacted ${emoji}`, body: messageSummary(message), link: { page: 'messages', userId: req.user.id } });
+  if (!had) notify(message.senderId, { type: 'reaction', fromUserId: req.user.id, title: `${userName(req.user.id)} reacted ${emoji}`, body: messageSummary(message), link: message.groupId ? { page: 'messages', groupId: message.groupId } : { page: 'messages', userId: req.user.id } });
   return res.json({ message: emitMessage('message-updated', message) });
+});
+
+// ---------- Chat group management ----------
+// Anyone can start a group; its creator and any manager rename it and add or remove people; anyone can leave.
+// Changes are posted in the group as small notes, so everyone sees who was added or removed and by whom.
+const GROUP_NAME_MAX = 60;
+const GROUP_MEMBERS_MAX = 50;
+const canManageGroup = (group, user) => Boolean(user && (group.createdBy === user.id || isManagerRole(user)));
+function groupView(group, userId) {
+  return { id: group.id, name: group.name, members: group.members, createdBy: group.createdBy, createdAt: group.createdAt, canManage: canManageGroup(group, state.users.find((user) => user.id === userId)) };
+}
+const nameList = (ids) => ids.map(userName).join(', ');
+function groupNote(group, actorId, text) {
+  const note = { id: randomUUID(), groupId: group.id, senderId: actorId, receiverId: null, system: true, text, attachments: [], reactions: {}, createdAt: new Date().toISOString(), readBy: [...group.members] };
+  state.messages.push(note);
+  saveRow('messages', note);
+  emitMessage('new-message', note);
+}
+const groupsChanged = (group, extraIds = []) => { for (const id of new Set([...group.members, ...extraIds])) io.to(id).emit('groups:changed', { groupId: group.id }); };
+function notifyGroup(group, message, prefix = '') {
+  const sender = userName(message.senderId);
+  for (const memberId of group.members) {
+    if (memberId === message.senderId) continue;
+    notify(memberId, message.share && !prefix
+      ? { type: 'question', fromUserId: message.senderId, chat: group.id, title: `${sender} · question in ${group.name}`, body: `About ${shareTitle({ ...message.share, receiverId: memberId })}${message.text ? `: ${message.text}` : ''}`, link: { page: 'messages', groupId: group.id } }
+      : { type: 'message', fromUserId: message.senderId, chat: group.id, title: group.name, body: `${sender}: ${prefix}${messageSummary(message)}`, link: { page: 'messages', groupId: group.id } });
+  }
+}
+const cleanGroupName = (value) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, GROUP_NAME_MAX);
+const activeColleagues = (ids, exceptId) => [...new Set(Array.isArray(ids) ? ids : [])].filter((id) => id !== exceptId && state.users.some((user) => user.id === id && user.active !== false));
+
+app.post('/api/groups', authMiddleware, (req, res) => {
+  const name = cleanGroupName(req.body?.name);
+  if (!name) return res.status(400).json({ message: 'Give the group a name.' });
+  const others = activeColleagues(req.body?.memberIds, req.user.id);
+  if (!others.length) return res.status(400).json({ message: 'Add at least one person to the group.' });
+  if (others.length + 1 > GROUP_MEMBERS_MAX) return res.status(400).json({ message: `A group can have at most ${GROUP_MEMBERS_MAX} people.` });
+  const group = { id: randomUUID(), name, members: [req.user.id, ...others], createdBy: req.user.id, createdAt: new Date().toISOString() };
+  state.chatGroups.push(group);
+  saveRow('chat_groups', group);
+  groupNote(group, req.user.id, `${userName(req.user.id)} created the group and added ${nameList(others)}`);
+  for (const id of others) notify(id, { type: 'message', fromUserId: req.user.id, chat: group.id, title: group.name, body: `${userName(req.user.id)} added you to the group`, link: { page: 'messages', groupId: group.id } });
+  groupsChanged(group);
+  return res.status(201).json({ group: groupView(group, req.user.id) });
+});
+
+app.patch('/api/groups/:id', authMiddleware, (req, res) => {
+  const group = groupById(req.params.id);
+  const actor = currentUser(req);
+  if (!group || (!isGroupMember(group, req.user.id) && !isManagerRole(actor))) return res.status(404).json({ message: 'Group not found.' });
+  if (!canManageGroup(group, actor)) return res.status(403).json({ message: 'Only the person who created the group or a manager can change it.' });
+  const name = req.body?.name === undefined ? group.name : cleanGroupName(req.body.name);
+  if (!name) return res.status(400).json({ message: 'Give the group a name.' });
+  const add = activeColleagues(req.body?.add, null).filter((id) => !group.members.includes(id));
+  const remove = [...new Set(Array.isArray(req.body?.remove) ? req.body.remove : [])].filter((id) => group.members.includes(id));
+  if (group.members.length + add.length - remove.length > GROUP_MEMBERS_MAX) return res.status(400).json({ message: `A group can have at most ${GROUP_MEMBERS_MAX} people.` });
+  const actorName = userName(req.user.id);
+  if (name !== group.name) { group.name = name; groupNote(group, req.user.id, `${actorName} renamed the group to "${name}"`); }
+  if (add.length) {
+    group.members = [...group.members, ...add];
+    groupNote(group, req.user.id, `${actorName} added ${nameList(add)}`);
+    for (const id of add) notify(id, { type: 'message', fromUserId: req.user.id, chat: group.id, title: group.name, body: `${actorName} added you to the group`, link: { page: 'messages', groupId: group.id } });
+  }
+  if (remove.length) {
+    groupNote(group, req.user.id, `${actorName} removed ${nameList(remove)}`);
+    group.members = group.members.filter((id) => !remove.includes(id));
+  }
+  group.updatedAt = new Date().toISOString();
+  if (!group.members.length) group.deletedAt = group.updatedAt;
+  saveRow('chat_groups', group);
+  groupsChanged(group, remove);
+  return res.json({ group: groupView(group, req.user.id) });
+});
+
+app.post('/api/groups/:id/leave', authMiddleware, (req, res) => {
+  const group = groupById(req.params.id);
+  if (!group || !isGroupMember(group, req.user.id)) return res.status(404).json({ message: 'Group not found.' });
+  groupNote(group, req.user.id, `${userName(req.user.id)} left the group`);
+  group.members = group.members.filter((id) => id !== req.user.id);
+  group.updatedAt = new Date().toISOString();
+  if (!group.members.length) group.deletedAt = group.updatedAt;
+  saveRow('chat_groups', group);
+  groupsChanged(group, [req.user.id]);
+  return res.json({ ok: true });
 });
 
 // Sockets must present a valid JWT (socket.io-client: `io(url, { auth: { token } })`); the user id always comes from the token, never from the client.
@@ -1949,6 +2108,11 @@ io.on('connection', (socket) => {
 
   // "typing…" is relayed only to an active colleague; nothing is stored.
   socket.on('typing', (to) => {
+    const group = groupById(to);
+    if (group) {
+      if (isGroupMember(group, userId)) for (const id of group.members) if (id !== userId) io.to(id).emit('typing', { from: group.id, who: userId });
+      return;
+    }
     if (typeof to === 'string' && to !== userId && state.users.some((user) => user.id === to && user.active !== false)) io.to(to).emit('typing', { from: userId });
   });
 

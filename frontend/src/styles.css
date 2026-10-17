@@ -813,3 +813,36 @@ main form .manager-flag input, .manager-flag input { width: 20px; min-height: 0;
 .report-tabs { margin: 0 0 14px; }
 .report-tabs .tab-count { display: inline-block; min-width: 20px; margin-left: 6px; padding: 1px 6px; border-radius: 999px; background: #e9eef3; color: var(--slate); font-size: 11px; font-weight: 700; }
 .report-tabs .active .tab-count { background: var(--accent-soft); color: var(--accent); }
+
+/* Chat groups: list header with "New group", square-ish group avatars, change notes in the thread, sender names. */
+.chat-list-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 10px 6px; }
+.chat-people .chat-list-head .kicker { margin: 0; }
+.new-group { font-size: 12px; padding: 4px 0; }
+.chat-hint { margin: 0 10px 10px; font-size: 12px; }
+.avatar.group-avatar { border-radius: 11px; background: #dfe8f4; color: #1d4f80; }
+.chat-title-button { flex: 1; min-width: 0; padding: 0; background: none; color: inherit; text-align: left; }
+.chat-title-button strong { display: block; }
+.chat-title-button small { display: block; margin-top: 3px; color: var(--slate); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-title-button small.typing { color: var(--accent); font-weight: 700; }
+.chat-header .group-info { font-size: 12px; white-space: nowrap; }
+.group-note { display: flex; justify-content: center; margin: 8px 0; }
+.group-note span { max-width: 85%; padding: 4px 10px; border-radius: 12px; background: #eef2ee; color: var(--slate); font-size: 11px; text-align: center; }
+.bubble .sender { display: block; margin: 0 0 3px; color: var(--accent); font-size: 11px; font-weight: 700; }
+.bubble.mine .sender { text-align: left; }
+.group-modal { max-height: 90vh; overflow-y: auto; }
+.group-modal label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 700; color: var(--slate); }
+.group-members { display: flex; flex-direction: column; gap: 2px; }
+.group-members .kicker { margin-bottom: 4px; }
+.modal .group-member { display: flex; cursor: default; }
+.group-member small:first-letter { text-transform: uppercase; }
+.group-member small { text-transform: none; }
+.group-member > span:nth-child(2) { flex: 1; min-width: 0; }
+.group-member .danger, .leave-group { color: #b42318; }
+.leave-group { align-self: flex-start; }
+
+/* Task board: supervisors switch between everyone's tasks and their own; their own cards are marked. */
+.task-scope { display: inline-flex; padding: 3px; border: 1px solid var(--line); border-radius: 999px; background: #fff; }
+.task-scope button { padding: 6px 12px; border-radius: 999px; background: none; color: var(--slate); font-size: 12px; font-weight: 700; }
+.task-scope button.active { background: var(--accent); color: #fff; }
+.task.task-mine { border-left: 3px solid var(--accent); }
+@media (max-width: 600px) { .heading:has(.task-scope) { flex-wrap: wrap; gap: 12px; } .chat-header .group-info { display: none; } }
