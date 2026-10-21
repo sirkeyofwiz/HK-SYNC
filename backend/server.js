@@ -971,7 +971,7 @@ app.post('/api/reports', authMiddleware, reportJson, (req, res) => {
     }
   }
   if (report.type === 'handover' && data.receivedById) {
-    const next = [['Rooms to check', data.roomsToCheck], ['Turn-down', data.turndownRooms]].filter(([, value]) => String(value || '').trim()).map(([label, value]) => `${label}: ${String(value).trim()}`).join(' · ');
+    const next = [['Emergency', data.emergencyRoomsReady], ['VIP', data.vipRooms], ['Repeaters', data.repeaterRooms], ['Rooms to check', data.roomsToCheck], ['Turn-down', data.turndownRooms]].filter(([, value]) => String(value || '').trim()).map(([label, value]) => `${label}: ${String(value).trim()}`).join(' · ');
     notify(data.receivedById, { type: 'handover', fromUserId: req.user.id, title: 'Shift handover for you', body: `From ${submitter.name}${next ? ` · ${next}` : ''}`, link: { page: 'report', id: report.id } });
   }
   if (report.type === 'inspection_rate' && data.supervisorId) {
