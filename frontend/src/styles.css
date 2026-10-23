@@ -941,3 +941,7 @@ main form .manager-flag input, .manager-flag input { width: 20px; min-height: 0;
 /* HK name drop-down: same look as the other boxes */
 select.hk-select { width: 100%; }
 select.hk-select:invalid { color: var(--slate); }
+
+/* Goals progress tags, same bands as the Overview: Good 8+, OK 7-7.9, Needs support under 7 */
+.tag.ok { background: var(--accent-soft); color: var(--accent); }
+.tag.support { background: #fbe9e8; color: var(--red); }
