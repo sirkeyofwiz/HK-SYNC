@@ -927,3 +927,10 @@ main form .manager-flag input, .manager-flag input { width: 20px; min-height: 0;
 .chat .msg-menu { z-index: 41; }
 /* Wide screens show the chat list beside the conversation, so there is nothing to go back to. */
 @media (min-width: 1101px) { .chat-back { display: none; } }
+
+/* Shift Handover: what the manager should look at */
+.manager-note { display: grid; gap: 10px; margin: -4px 0 12px; padding: 12px 14px; border: 1px solid var(--red); border-top: 0; border-radius: 0 0 10px 10px; background: #fdf3f2; }
+.manager-note small { font-size: 12px; }
+.handover-manager { display: grid; gap: 6px; margin-bottom: 14px; padding: 12px 14px; border-left: 4px solid var(--red); border-radius: 8px; background: #fdf3f2; }
+.handover-manager .handover-flag { margin: 0; justify-self: start; }
+.handover-manager p:not(.badge) { margin: 0; color: var(--ink); font-weight: 600; }

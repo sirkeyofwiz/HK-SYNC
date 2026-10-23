@@ -920,6 +920,9 @@ app.get('/api/reports/:id', authMiddleware, (req, res) => {
 
 // The person a Shift Handover is handed to. Newer apps send their account id; older ones only a typed name,
 // which is linked when it matches exactly one active colleague (full name, or a first name nobody else has).
+// What a "Needs a manager" handover is about (the app offers the same list).
+const MANAGER_TOPICS = ['Guest complaint', 'Maintenance or fault', 'Room not ready / VIP issue', 'Staff issue', 'Lost and found', 'Other'];
+
 function handoverReceiver(data, submitterId) {
   const colleagues = state.users.filter((user) => user.active !== false && user.id !== submitterId);
   if (data.receivedById) return colleagues.find((user) => user.id === data.receivedById) || null;
@@ -954,7 +957,12 @@ app.post('/api/reports', authMiddleware, reportJson, (req, res) => {
     if (receiver) { data.receivedById = receiver.id; data.receivedBy = receiver.name; } else delete data.receivedById;
     if (!String(data.handoverFrom || '').trim()) data.handoverFrom = submitter.name;
     data.needsManager = data.needsManager === true;
-    if (data.needsManager && !String(data.notes || '').trim()) return res.status(400).json({ message: 'Write in Remarks what the manager needs to know.' });
+    if (data.needsManager) {
+      // Older app versions put the manager's issue in Remarks; newer ones send a topic and a note of its own.
+      data.managerNote = String(data.managerNote || '').trim().slice(0, 500) || String(data.notes || '').trim().slice(0, 500);
+      if (!data.managerNote) return res.status(400).json({ message: 'Say what the manager should look at.' });
+      data.managerTopic = MANAGER_TOPICS.includes(data.managerTopic) ? data.managerTopic : 'Other';
+    } else { delete data.managerNote; delete data.managerTopic; }
   } else { delete data.receivedById; delete data.needsManager; }
   const report = {
     id: randomUUID(), type, date, data, submittedBy: req.user.id,
@@ -967,7 +975,7 @@ app.post('/api/reports', authMiddleware, reportJson, (req, res) => {
   const place = data.area || data.block || data.vehicleId || '';
   if (summary.flagged) {
     for (const manager of state.users.filter((user) => isManagerRole(user) && user.active !== false)) {
-      notify(manager.id, { type: 'report_flagged', fromUserId: req.user.id, title: `Needs attention · ${label}`, body: report.type === 'handover' ? `${submitter.name} · ${String(data.notes).trim()}` : `${submitter.name}${summary.flaggedCount ? ` · ${summary.flaggedCount} flagged` : ''}${place ? ` · ${place}` : ''}`, link: { page: 'report', id: report.id } });
+      notify(manager.id, { type: 'report_flagged', fromUserId: req.user.id, title: `Needs attention · ${label}`, body: report.type === 'handover' ? `${submitter.name} · ${data.managerTopic}: ${data.managerNote}` : `${submitter.name}${summary.flaggedCount ? ` · ${summary.flaggedCount} flagged` : ''}${place ? ` · ${place}` : ''}`, link: { page: 'report', id: report.id } });
     }
   }
   if (report.type === 'handover' && data.receivedById) {
