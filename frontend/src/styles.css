@@ -937,3 +937,7 @@ main form .manager-flag input, .manager-flag input { width: 20px; min-height: 0;
 
 /* Report form: Cancel beside Save when editing */
 .form-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+
+/* HK name drop-down: same look as the other boxes */
+select.hk-select { width: 100%; }
+select.hk-select:invalid { color: var(--slate); }
