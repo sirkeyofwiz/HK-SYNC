@@ -915,7 +915,7 @@ app.get('/api/reports/:id', authMiddleware, (req, res) => {
   const viewer = currentUser(req);
   const report = state.reports.find((entry) => entry.id === req.params.id && !entry.voided);
   if (!canSeeReport(viewer, report)) return res.status(404).json({ message: 'Report not found.' });
-  return res.json({ report: { ...report, submitter: sanitizeUser(state.users.find((user) => user.id === report.submittedBy) || {}), ...reportSummary(report), threshold: FLAG_THRESHOLDS[report.type] ?? 6, discussion: discussionIndex(req.user.id).get(`report:${report.id}`) || null, canManage: isManagerRole(viewer), canDelete: canDeleteReport(viewer, report) } });
+  return res.json({ report: { ...report, submitter: sanitizeUser(state.users.find((user) => user.id === report.submittedBy) || {}), ...reportSummary(report), threshold: FLAG_THRESHOLDS[report.type] ?? 6, discussion: discussionIndex(req.user.id).get(`report:${report.id}`) || null, canManage: isManagerRole(viewer), canDelete: canDeleteReport(viewer, report), canEdit: canEditReport(viewer, report), editedByName: report.editedBy ? userName(report.editedBy) : null } });
 });
 
 // The person a Shift Handover is handed to. Newer apps send their account id; older ones only a typed name,
@@ -934,6 +934,54 @@ function handoverReceiver(data, submitterId) {
   return first.length === 1 && typed.split(/\s+/).length === 1 ? first[0] : null;
 }
 
+// Type-specific checks and tidying for a new or edited report. Returns a message for the person, or null when it is fine.
+// `submitter` is whoever filed the report (an edit by a manager keeps the original submitter).
+function prepareReportData(type, data, submitter) {
+  if (type === 'guest_interaction' && (!Array.isArray(data.entries) || !data.entries.length || data.entries.some((entry) => !String(entry?.hkName || '').trim()))) {
+    return 'Add the housekeeper being assessed.';
+  }
+  if (type === 'inspection_rate') {
+    const evaluated = state.users.find((user) => user.id === data.supervisorId && user.role === 'supervisor' && user.active !== false);
+    if (!evaluated) return 'Choose the supervisor being evaluated.';
+    data.supervisorName = evaluated.name;
+  }
+  if (type === 'handover') {
+    if (data.receivedById && !handoverReceiver(data, submitter.id)) return 'Choose who is receiving the handover.';
+    const receiver = handoverReceiver(data, submitter.id);
+    if (receiver) { data.receivedById = receiver.id; data.receivedBy = receiver.name; } else delete data.receivedById;
+    if (!String(data.handoverFrom || '').trim()) data.handoverFrom = submitter.name;
+    data.needsManager = data.needsManager === true;
+    if (data.needsManager) {
+      // Older app versions put the manager's issue in Remarks; newer ones send a topic and a note of its own.
+      data.managerNote = String(data.managerNote || '').trim().slice(0, 500) || String(data.notes || '').trim().slice(0, 500);
+      if (!data.managerNote) return 'Say what the manager should look at.';
+      data.managerTopic = MANAGER_TOPICS.includes(data.managerTopic) ? data.managerTopic : 'Other';
+    } else { delete data.managerNote; delete data.managerTopic; }
+  } else { delete data.receivedById; delete data.needsManager; }
+  return null;
+}
+
+// Alerts after a report is saved. `before` is the report as it was before an edit (null for a new report):
+// an edit only alerts about what it adds — a new problem, a new handover receiver, a newly rated supervisor.
+function announceReport(report, submitter, actorId, before = null) {
+  const data = report.data;
+  const summary = reportSummary(report);
+  const label = REPORT_LABELS[report.type] || 'Report';
+  const place = data.area || data.block || data.vehicleId || '';
+  if (summary.flagged && !before?.flagged) {
+    for (const manager of state.users.filter((user) => isManagerRole(user) && user.active !== false)) {
+      notify(manager.id, { type: 'report_flagged', fromUserId: actorId, title: `Needs attention · ${label}`, body: report.type === 'handover' ? `${submitter.name} · ${data.managerTopic}: ${data.managerNote}` : `${submitter.name}${summary.flaggedCount ? ` · ${summary.flaggedCount} flagged` : ''}${place ? ` · ${place}` : ''}`, link: { page: 'report', id: report.id } });
+    }
+  }
+  if (report.type === 'handover' && data.receivedById && data.receivedById !== before?.receivedById) {
+    const next = [['Emergency', data.emergencyRoomsReady], ['VIP', data.vipRooms], ['Repeaters', data.repeaterRooms], ['Rooms to check', data.roomsToCheck], ['Turn-down', data.turndownRooms]].filter(([, value]) => String(value || '').trim()).map(([name, value]) => `${name}: ${String(value).trim()}`).join(' · ');
+    notify(data.receivedById, { type: 'handover', fromUserId: actorId, title: 'Shift handover for you', body: `From ${submitter.name}${next ? ` · ${next}` : ''}`, link: { page: 'report', id: report.id } });
+  }
+  if (report.type === 'inspection_rate' && data.supervisorId && data.supervisorId !== before?.supervisorId) {
+    notify(data.supervisorId, { type: 'inspected', fromUserId: actorId, title: 'You were inspected', body: `${submitter.name} · ${summary.itemCount} room${summary.itemCount === 1 ? '' : 's'}${place ? ` · ${place}` : ''} · average ${summary.average}/10`, link: { page: 'report', id: report.id } });
+  }
+}
+
 app.post('/api/reports', authMiddleware, reportJson, (req, res) => {
   const { type, date, data } = req.body || {};
   if (!type || !date || !data) return res.status(400).json({ message: 'Report type, date and data are required.' });
@@ -943,49 +991,16 @@ app.post('/api/reports', authMiddleware, reportJson, (req, res) => {
   if (!roleReportTypes[submitter?.role]?.includes(type)) {
     return res.status(403).json({ message: 'Your role cannot submit this report type.' });
   }
-  if (type === 'guest_interaction' && (!Array.isArray(data.entries) || !data.entries.length || data.entries.some((entry) => !String(entry?.hkName || '').trim()))) {
-    return res.status(400).json({ message: 'Add the housekeeper being assessed.' });
-  }
-  if (type === 'inspection_rate') {
-    const evaluated = state.users.find((user) => user.id === data.supervisorId && user.role === 'supervisor' && user.active !== false);
-    if (!evaluated) return res.status(400).json({ message: 'Choose the supervisor being evaluated.' });
-    data.supervisorName = evaluated.name;
-  }
-  if (type === 'handover') {
-    if (data.receivedById && !handoverReceiver(data, req.user.id)) return res.status(400).json({ message: 'Choose who is receiving the handover.' });
-    const receiver = handoverReceiver(data, req.user.id);
-    if (receiver) { data.receivedById = receiver.id; data.receivedBy = receiver.name; } else delete data.receivedById;
-    if (!String(data.handoverFrom || '').trim()) data.handoverFrom = submitter.name;
-    data.needsManager = data.needsManager === true;
-    if (data.needsManager) {
-      // Older app versions put the manager's issue in Remarks; newer ones send a topic and a note of its own.
-      data.managerNote = String(data.managerNote || '').trim().slice(0, 500) || String(data.notes || '').trim().slice(0, 500);
-      if (!data.managerNote) return res.status(400).json({ message: 'Say what the manager should look at.' });
-      data.managerTopic = MANAGER_TOPICS.includes(data.managerTopic) ? data.managerTopic : 'Other';
-    } else { delete data.managerNote; delete data.managerTopic; }
-  } else { delete data.receivedById; delete data.needsManager; }
+  const dataProblem = prepareReportData(type, data, submitter);
+  if (dataProblem) return res.status(400).json({ message: dataProblem });
   const report = {
     id: randomUUID(), type, date, data, submittedBy: req.user.id,
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), hodSignature: null
   };
   state.reports.push(report);
   saveRow('reports', report);
-  const summary = reportSummary(report);
-  const label = REPORT_LABELS[report.type] || 'Report';
-  const place = data.area || data.block || data.vehicleId || '';
-  if (summary.flagged) {
-    for (const manager of state.users.filter((user) => isManagerRole(user) && user.active !== false)) {
-      notify(manager.id, { type: 'report_flagged', fromUserId: req.user.id, title: `Needs attention · ${label}`, body: report.type === 'handover' ? `${submitter.name} · ${data.managerTopic}: ${data.managerNote}` : `${submitter.name}${summary.flaggedCount ? ` · ${summary.flaggedCount} flagged` : ''}${place ? ` · ${place}` : ''}`, link: { page: 'report', id: report.id } });
-    }
-  }
-  if (report.type === 'handover' && data.receivedById) {
-    const next = [['Emergency', data.emergencyRoomsReady], ['VIP', data.vipRooms], ['Repeaters', data.repeaterRooms], ['Rooms to check', data.roomsToCheck], ['Turn-down', data.turndownRooms]].filter(([, value]) => String(value || '').trim()).map(([label, value]) => `${label}: ${String(value).trim()}`).join(' · ');
-    notify(data.receivedById, { type: 'handover', fromUserId: req.user.id, title: 'Shift handover for you', body: `From ${submitter.name}${next ? ` · ${next}` : ''}`, link: { page: 'report', id: report.id } });
-  }
-  if (report.type === 'inspection_rate' && data.supervisorId) {
-    notify(data.supervisorId, { type: 'inspected', fromUserId: req.user.id, title: 'You were inspected', body: `${submitter.name} · ${summary.itemCount} room${summary.itemCount === 1 ? '' : 's'}${place ? ` · ${place}` : ''} · average ${summary.average}/10`, link: { page: 'report', id: report.id } });
-  }
-  return res.status(201).json({ report: { ...report, data: withoutPhotos(report.data), ...summary } });
+  announceReport(report, submitter, req.user.id);
+  return res.status(201).json({ report: { ...report, data: withoutPhotos(report.data), ...reportSummary(report) } });
 });
 
 // Reject malformed reports before they are stored: one bad row would otherwise break the report and goals pages for everyone.
@@ -993,13 +1008,13 @@ const REPORT_LINE_LIMIT = 200;
 const REPORT_BACKDATE_DAYS = 7;
 // YYYY-MM-DD in the hotel's time zone, offset by whole days.
 const dateInAppZone = (offsetDays) => new Intl.DateTimeFormat('en-CA', { timeZone: APP_TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(Date.now() + offsetDays * 86400000));
-function reportProblem(date, data) {
+function reportProblem(date, data, { checkDate = true } = {}) {
   if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date))) return 'Choose a valid report date.';
   // Up to a week back for late paperwork, never ahead (one day of slack for phones on another clock), so points can't be stockpiled.
   // ALLOW_ANY_REPORT_DATE=1 switches this off, e.g. while importing old paper reports or in automated tests.
   const today = dateInAppZone(0);
-  if (!process.env.ALLOW_ANY_REPORT_DATE && date > dateInAppZone(1)) return 'A report cannot be dated in the future.';
-  if (!process.env.ALLOW_ANY_REPORT_DATE && date < dateInAppZone(-REPORT_BACKDATE_DAYS)) return `Reports can only be dated up to ${REPORT_BACKDATE_DAYS} days back (earliest ${dateInAppZone(-REPORT_BACKDATE_DAYS)}, today is ${today}).`;
+  if (checkDate && !process.env.ALLOW_ANY_REPORT_DATE && date > dateInAppZone(1)) return 'A report cannot be dated in the future.';
+  if (checkDate && !process.env.ALLOW_ANY_REPORT_DATE && date < dateInAppZone(-REPORT_BACKDATE_DAYS)) return `Reports can only be dated up to ${REPORT_BACKDATE_DAYS} days back (earliest ${dateInAppZone(-REPORT_BACKDATE_DAYS)}, today is ${today}).`;
   if (!isPlainObject(data)) return 'The report is missing its details.';
   for (const key of ['entries', 'trolleys', 'pantries']) {
     const lines = data[key];
@@ -1244,6 +1259,31 @@ app.put('/api/goals', authMiddleware, requireManager, (req, res) => {
 // Deleting hides a report everywhere (lists, goals, points, profiles) but keeps it in the database and backups,
 // marked with who deleted it and when, so a mistake can be undone and nothing disappears without a trace.
 // Managers can delete any report; the person who filed it can delete it until a manager signs it off.
+// Editing follows the same rule as deleting: the submitter until sign-off, managers always.
+const canEditReport = (user, report) => Boolean(user && report && !report.voided && (isManagerRole(user) || (report.submittedBy === user.id && !report.hodSignedAt)));
+app.put('/api/reports/:id', authMiddleware, reportJson, (req, res) => {
+  const editor = currentUser(req);
+  const report = state.reports.find((entry) => entry.id === req.params.id && !entry.voided);
+  if (!canSeeReport(editor, report)) return res.status(404).json({ message: 'Report not found.' });
+  if (!canEditReport(editor, report)) return res.status(403).json({ message: 'This report has been signed off. Ask a manager to change it.' });
+  const data = req.body?.data;
+  const problem = reportProblem(report.date, data, { checkDate: false });
+  if (problem) return res.status(400).json({ message: problem });
+  const submitter = state.users.find((user) => user.id === report.submittedBy) || editor;
+  const dataProblem = prepareReportData(report.type, data, submitter);
+  if (dataProblem) return res.status(400).json({ message: dataProblem });
+  const before = { flagged: reportSummary(report).flagged, receivedById: report.data?.receivedById, supervisorId: report.data?.supervisorId };
+  const now = new Date().toISOString();
+  report.data = data;
+  report.updatedAt = now;
+  report.editedAt = now;
+  report.editedBy = editor.id;
+  report.edits = [...(Array.isArray(report.edits) ? report.edits : []), { at: now, by: editor.id }].slice(-50);
+  saveRow('reports', report);
+  announceReport(report, submitter, editor.id, before);
+  return res.json({ report: { ...report, data: withoutPhotos(report.data), ...reportSummary(report) } });
+});
+
 const canDeleteReport = (user, report) => Boolean(user && report && !report.voided && (isManagerRole(user) || (report.submittedBy === user.id && !report.hodSignedAt)));
 app.delete('/api/reports/:id', authMiddleware, (req, res) => {
   const viewer = currentUser(req);

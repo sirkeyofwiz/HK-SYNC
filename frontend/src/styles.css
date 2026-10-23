@@ -934,3 +934,6 @@ main form .manager-flag input, .manager-flag input { width: 20px; min-height: 0;
 .handover-manager { display: grid; gap: 6px; margin-bottom: 14px; padding: 12px 14px; border-left: 4px solid var(--red); border-radius: 8px; background: #fdf3f2; }
 .handover-manager .handover-flag { margin: 0; justify-self: start; }
 .handover-manager p:not(.badge) { margin: 0; color: var(--ink); font-weight: 600; }
+
+/* Report form: Cancel beside Save when editing */
+.form-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
