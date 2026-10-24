@@ -69,7 +69,22 @@ export function snapshotsToDelete(keys) {
   return dated.filter((item) => !keep.has(item.key)).map((item) => item.key);
 }
 
-export async function runBackup({ database, dataDir, uploadDir, attachmentIds, today }) {
+// Report photos are named by their content, so a name in the bucket never needs re-uploading. They are never removed
+// from the bucket: older database copies may still point at them.
+async function uploadPhotos(photoDir, photoNames) {
+  if (!photoDir) return 0;
+  const stored = new Set((await listAll('photos/')).map((item) => item.key));
+  let uploaded = 0;
+  for (const name of photoNames) {
+    const local = path.join(photoDir, name);
+    if (stored.has(`photos/${name}`) || !fs.existsSync(local)) continue;
+    await put(`photos/${name}`, fs.readFileSync(local), 'application/octet-stream');
+    uploaded += 1;
+  }
+  return uploaded;
+}
+
+export async function runBackup({ database, dataDir, uploadDir, attachmentIds, photoDir, photoNames = [], today }) {
   if (!backupConfigured) throw new Error('Backups are not set up: the BACKUP_* settings are missing.');
   const snapshot = await databaseSnapshot(database, dataDir);
   const key = `db/${today}.sqlite.gz`;
@@ -89,10 +104,12 @@ export async function runBackup({ database, dataDir, uploadDir, attachmentIds, t
     if (!current.has(item.key) && item.lastModified && new Date(item.lastModified).getTime() < graceCutoff) await remove(item.key);
   }
 
+  const photosUploaded = await uploadPhotos(photoDir, photoNames);
+
   const snapshots = await listAll('db/');
   const expired = snapshotsToDelete(snapshots.map((item) => item.key));
   for (const old of expired) await remove(old);
-  return { key, size: snapshot.length, filesUploaded, filesTotal: current.size, snapshotsKept: snapshots.length - expired.length };
+  return { key, size: snapshot.length, filesUploaded, filesTotal: current.size, photosUploaded, photosTotal: photoNames.length, snapshotsKept: snapshots.length - expired.length };
 }
 
 // Readable reason for a failed storage call (network errors arrive as an AggregateError with no message).
@@ -112,7 +129,7 @@ export async function listSnapshots() {
 // Restore, run before the database is opened: set RESTORE_BACKUP to a key such as db/2026-10-05.sqlite.gz
 // (or "latest") and redeploy. The current database is moved aside, never deleted, and a marker stops the
 // same restore from running again on later restarts. Remove RESTORE_BACKUP once the app looks right.
-export async function restoreIfRequested({ dataDir, databasePath, uploadDir }) {
+export async function restoreIfRequested({ dataDir, databasePath, uploadDir, photoDir }) {
   const requested = String(env.RESTORE_BACKUP || '').trim();
   if (!requested) return null;
   if (!backupConfigured) { console.error('RESTORE_BACKUP is set but backups are not configured; nothing restored.'); return null; }
@@ -151,7 +168,19 @@ export async function restoreIfRequested({ dataDir, databasePath, uploadDir }) {
     fs.writeFileSync(local, await download(item.key));
     files += 1;
   }
+  // And any report photos. Copies made before photos became files carry them inside the database instead; the server
+  // moves those into files when it starts.
+  let photos = 0;
+  if (photoDir) {
+    fs.mkdirSync(photoDir, { recursive: true });
+    for (const item of await listAll('photos/')) {
+      const local = path.join(photoDir, path.basename(item.key));
+      if (fs.existsSync(local)) continue;
+      fs.writeFileSync(local, await download(item.key));
+      photos += 1;
+    }
+  }
   fs.writeFileSync(markerPath, JSON.stringify({ key, at: new Date().toISOString(), previous: aside }));
-  console.log(`RESTORE_BACKUP: restored ${key} (${files} chat files brought back). The previous database was kept in ${aside}.`);
-  return { key, files, previous: aside };
+  console.log(`RESTORE_BACKUP: restored ${key} (${files} chat files and ${photos} report photos brought back). The previous database was kept in ${aside}.`);
+  return { key, files, photos, previous: aside };
 }

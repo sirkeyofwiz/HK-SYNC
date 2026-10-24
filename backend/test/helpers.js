@@ -17,8 +17,10 @@ const freePort = () => new Promise((resolve, reject) => {
   });
 });
 
-export async function startServer(extraEnv = {}) {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hk-sync-test-'));
+export const newDataDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'hk-sync-test-'));
+
+// `dataDir` lets a test prepare the folder first (e.g. an old-style database); it is removed on stop either way.
+export async function startServer(extraEnv = {}, { dataDir = newDataDir() } = {}) {
   const port = await freePort();
   const env = { ...process.env };
   // Never let a developer's own settings (live bucket, email, Firebase) reach a test server.
@@ -43,6 +45,7 @@ export async function startServer(extraEnv = {}) {
   const url = `http://127.0.0.1:${port}`;
   return {
     url,
+    dataDir,
     output: () => output,
     async stop() {
       const exited = new Promise((resolve) => child.once('exit', resolve));

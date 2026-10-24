@@ -26,10 +26,11 @@ if (!fs.existsSync(DATA_DIR)) {
 
 const dataFilePath = path.join(DATA_DIR, 'db.json');
 const databasePath = path.join(DATA_DIR, 'bahari.sqlite');
+const PHOTO_DIR = path.join(DATA_DIR, 'report-photos');
 // RESTORE_BACKUP=<backup name> swaps in a backup from the bucket before anything is opened (see backup.js).
 // A failed restore must never stop the app: it logs the problem and carries on with the current data.
 try {
-  await restoreIfRequested({ dataDir: DATA_DIR, databasePath, uploadDir: path.join(DATA_DIR, 'uploads') });
+  await restoreIfRequested({ dataDir: DATA_DIR, databasePath, uploadDir: path.join(DATA_DIR, 'uploads'), photoDir: PHOTO_DIR });
 } catch (error) {
   console.error('RESTORE_BACKUP failed, keeping the current database:', describeError(error));
 }
@@ -103,7 +104,8 @@ process.on('uncaughtException', (error) => {
   try { database.close(); } catch { /* already closed */ }
   process.exit(1);
 });
-// Requests are small JSON, except a new report: its photos travel inside it, and 40 MB fits a full inspection with a
+// Requests are small JSON, except a new report: its photos travel inside it (the server then keeps them as files, see
+// "Report photos"), and 40 MB fits a full inspection with a
 // photo on every line (~100 phone photos). That large limit is only granted after sign-in (see POST /api/reports),
 // so nobody can make the server parse huge bodies on public routes such as sign-in.
 const smallJson = express.json({ limit: '1mb' });
@@ -565,8 +567,105 @@ function reportSummary(report) {
 function withoutPhotos(data) {
   if (!data) return data;
   if (!isPlainObject(data)) return {};
-  const strip = (entries) => Array.isArray(entries) ? entries.filter(isPlainObject).map(({ photo, ...entry }) => ({ ...entry, hasPhoto: Boolean(photo) })) : entries;
+  const strip = (entries) => Array.isArray(entries) ? entries.filter(isPlainObject).map(({ photo, photoFile, ...entry }) => ({ ...entry, hasPhoto: Boolean(photo || photoFile) })) : entries;
   return { ...data, entries: strip(data.entries), trolleys: strip(data.trolleys), pantries: strip(data.pantries) };
+}
+
+// ---------- Report photos ----------
+// Report photos are files on the data volume, named by a fingerprint (SHA-256) of the picture: the same photo is stored
+// once, however often a report is edited. A report line keeps only `photoFile`, so reports stay small in memory and in
+// the database. The app still sends and receives `photo` as a data: URL; the server converts on the way in and out.
+// The nightly backup copies new photo files to the bucket (photos/<name>), and a restore brings missing ones back.
+const PHOTO_LISTS = ['entries', 'trolleys', 'pantries'];
+const PHOTO_EXTENSIONS = { jpeg: 'jpg', png: 'png', webp: 'webp' };
+const PHOTO_TYPES = { jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
+const PHOTO_FILE_NAME = /^[0-9a-f]{64}\.(jpg|png|webp)$/;
+fs.mkdirSync(PHOTO_DIR, { recursive: true });
+
+function savePhotoFile(dataUrl) {
+  const match = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+  if (!match) return null;
+  const bytes = Buffer.from(match[2], 'base64');
+  const name = `${createHash('sha256').update(bytes).digest('hex')}.${PHOTO_EXTENSIONS[match[1]]}`;
+  const target = path.join(PHOTO_DIR, name);
+  if (!fs.existsSync(target)) {
+    // Write to a temporary name first, so a crash never leaves a half-written photo under the real name.
+    const temp = `${target}.${process.pid}.tmp`;
+    fs.writeFileSync(temp, bytes);
+    fs.renameSync(temp, target);
+  }
+  return name;
+}
+
+// Before a report is saved: every photo the app sent becomes a file. A `photoFile` sent by the app is never trusted.
+function storeReportPhotos(data) {
+  for (const key of PHOTO_LISTS) {
+    if (!Array.isArray(data?.[key])) continue;
+    for (const line of data[key]) {
+      if (!isPlainObject(line)) continue;
+      delete line.photoFile;
+      const name = typeof line.photo === 'string' && line.photo ? savePhotoFile(line.photo) : null;
+      delete line.photo;
+      if (name) line.photoFile = name;
+    }
+  }
+  return data;
+}
+
+// Reports saved before photos became files still carry them inline; returns true when it moved any.
+function movePhotosToFiles(report) {
+  const inline = PHOTO_LISTS.some((key) => reportLines(report, key).some((line) => typeof line.photo === 'string' && line.photo));
+  if (inline) storeReportPhotos(report.data);
+  return inline;
+}
+
+// For the full report view: the same `photo` data: URLs the app has always received. A missing file shows no photo.
+function withPhotos(data) {
+  if (!isPlainObject(data)) return data;
+  const copy = { ...data };
+  for (const key of PHOTO_LISTS) {
+    if (!Array.isArray(data[key])) continue;
+    copy[key] = data[key].map((line) => {
+      if (!isPlainObject(line) || !line.photoFile) return line;
+      const { photoFile, ...rest } = line;
+      const file = path.join(PHOTO_DIR, photoFile);
+      if (!PHOTO_FILE_NAME.test(photoFile) || !fs.existsSync(file)) {
+        console.error(`Report photo missing: ${photoFile}`);
+        return { ...rest, photo: null };
+      }
+      return { ...rest, photo: `data:${PHOTO_TYPES[photoFile.split('.').pop()]};base64,${fs.readFileSync(file).toString('base64')}` };
+    });
+  }
+  return copy;
+}
+
+const photoFileNames = () => [...new Set(state.reports.flatMap((report) => PHOTO_LISTS.flatMap((key) => reportLines(report, key).map((line) => line.photoFile)).filter(Boolean)))];
+
+{
+  // One-off move of older inline photos into files, report by report. Files are written before the report row is
+  // updated, so stopping half-way only leaves spare files; the next start carries on from where it stopped.
+  let moved = 0;
+  for (const report of state.reports) {
+    if (!movePhotosToFiles(report)) continue;
+    saveRow('reports', report);
+    moved += 1;
+  }
+  if (moved) console.log(`Report photos: moved the photos of ${moved} report${moved === 1 ? '' : 's'} into files.`);
+  // SQLite keeps the space the photos used, and backups would copy it too: compact the database once. It needs free
+  // room on the volume about the size of the database; without it nothing changes and the next start tries again.
+  const record = state.settings.find((entry) => entry.id === 'report-photos');
+  if (moved || !record?.compactedAt) {
+    try {
+      database.exec('VACUUM');
+      database.pragma('wal_checkpoint(TRUNCATE)');
+      const done = { ...record, id: 'report-photos', compactedAt: new Date().toISOString() };
+      state.settings = [...state.settings.filter((entry) => entry.id !== 'report-photos'), done];
+      saveRow('settings', done);
+      console.log(`Report photos: database compacted to ${Math.round(fs.statSync(databasePath).size / 1048576)} MB.`);
+    } catch (error) {
+      console.error('Report photos: compacting the database failed, it will be retried on the next start:', error.message);
+    }
+  }
 }
 
 function attachmentView(id) {
@@ -922,7 +1021,7 @@ app.get('/api/reports/:id', authMiddleware, (req, res) => {
   const viewer = currentUser(req);
   const report = state.reports.find((entry) => entry.id === req.params.id && !entry.voided);
   if (!canSeeReport(viewer, report)) return res.status(404).json({ message: 'Report not found.' });
-  return res.json({ report: { ...report, submitter: sanitizeUser(state.users.find((user) => user.id === report.submittedBy) || {}), ...reportSummary(report), threshold: FLAG_THRESHOLDS[report.type] ?? 6, discussion: discussionIndex(req.user.id).get(`report:${report.id}`) || null, canManage: isManagerRole(viewer), canDelete: canDeleteReport(viewer, report), canEdit: canEditReport(viewer, report), editedByName: report.editedBy ? userName(report.editedBy) : null } });
+  return res.json({ report: { ...report, data: withPhotos(report.data), submitter: sanitizeUser(state.users.find((user) => user.id === report.submittedBy) || {}), ...reportSummary(report), threshold: FLAG_THRESHOLDS[report.type] ?? 6, discussion: discussionIndex(req.user.id).get(`report:${report.id}`) || null, canManage: isManagerRole(viewer), canDelete: canDeleteReport(viewer, report), canEdit: canEditReport(viewer, report), editedByName: report.editedBy ? userName(report.editedBy) : null } });
 });
 
 // The person a Shift Handover is handed to. Newer apps send their account id; older ones only a typed name,
@@ -1005,6 +1104,7 @@ app.post('/api/reports', authMiddleware, reportJson, (req, res) => {
   }
   const dataProblem = prepareReportData(type, data, submitter);
   if (dataProblem) return res.status(400).json({ message: dataProblem });
+  storeReportPhotos(data);
   const report = {
     id: randomUUID(), type, date, data, submittedBy: req.user.id,
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), hodSignature: null
@@ -1293,6 +1393,7 @@ app.put('/api/reports/:id', authMiddleware, reportJson, (req, res) => {
   const dataProblem = prepareReportData(report.type, data, submitter);
   if (dataProblem) return res.status(400).json({ message: dataProblem });
   const before = { flagged: reportSummary(report).flagged, receivedById: report.data?.receivedById, supervisorId: report.data?.supervisorId };
+  storeReportPhotos(data);
   const now = new Date().toISOString();
   report.data = data;
   report.updatedAt = now;
@@ -2222,9 +2323,9 @@ function backupNow(trigger) {
   backupRunning = (async () => {
     const startedAt = new Date().toISOString();
     try {
-      const result = await runBackup({ database, dataDir: DATA_DIR, uploadDir: UPLOAD_DIR, attachmentIds: state.attachments.map((entry) => entry.id), today: appToday() });
+      const result = await runBackup({ database, dataDir: DATA_DIR, uploadDir: UPLOAD_DIR, attachmentIds: state.attachments.map((entry) => entry.id), photoDir: PHOTO_DIR, photoNames: photoFileNames(), today: appToday() });
       saveBackupRecord({ lastSuccess: { at: new Date().toISOString(), day: appToday(), trigger, ...result }, lastError: null });
-      console.log(`Backup saved: ${result.key} (${Math.round(result.size / 1024)} KB, ${result.filesUploaded} new chat files, ${result.snapshotsKept} copies kept).`);
+      console.log(`Backup saved: ${result.key} (${Math.round(result.size / 1024)} KB, ${result.filesUploaded} new chat files, ${result.photosUploaded} new report photos, ${result.snapshotsKept} copies kept).`);
       return result;
     } catch (error) {
       saveBackupRecord({ lastError: { at: startedAt, trigger, message: describeError(error) } });
