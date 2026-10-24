@@ -15,10 +15,11 @@ header {
     Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://api.fontshare.com https://fonts.googleapis.com; font-src 'self' https://cdn.fontshare.com https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://bahari-operations-api-production.up.railway.app wss://bahari-operations-api-production.up.railway.app; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 }
 
-# Never cache the main HTML file
+# Never cache the main HTML file. Page addresses (/reports/123, /tasks…) are answered with index.html too, so match
+# everything except the hashed assets: a cached old index.html would point at assets that no longer exist after a deploy.
+# This also keeps service-worker.js, the manifest and icons fresh (all tiny).
 @html {
-    path /index.html
-    path /
+    not path /assets/*
 }
 header @html {
     Cache-Control "no-cache, no-store, must-revalidate"
