@@ -538,7 +538,8 @@ function reportSummary(report) {
   const entries = scoredEntries(report);
   const threshold = FLAG_THRESHOLDS[report.type] ?? 6;
   const scores = entries.flatMap(scoreValues);
-  const hasBadVehicle = Object.values(report.data?.vehicle || {}).includes('Not OK');
+  const badVehicleItems = Object.values(report.data?.vehicle || {}).filter((value) => value === 'Not OK').length;
+  const hasBadVehicle = badVehicleItems > 0;
   // Report-level remarks (handover, vehicle notes) are information, not a problem: a handover is flagged only when
   // the supervisor ticks "Needs a manager", and a vehicle checklist only when an item is Not OK.
   const needsManager = report.type === 'handover' && report.data?.needsManager === true;
@@ -551,7 +552,7 @@ function reportSummary(report) {
     itemCount: entries.length || (report.data?.items ? report.data.items.length : 0),
     average: scores.length ? Number((scores.reduce((sum, value) => sum + value, 0) / scores.length).toFixed(1)) : 0,
     flagged: Boolean(hasBadVehicle || flaggedEntries.length || needsManager),
-    flaggedCount: flaggedEntries.length + (hasBadVehicle ? 1 : 0) + (needsManager ? 1 : 0)
+    flaggedCount: flaggedEntries.length + badVehicleItems + (needsManager ? 1 : 0)
   };
 }
 
@@ -958,6 +959,11 @@ function prepareReportData(type, data, submitter) {
       data.managerTopic = MANAGER_TOPICS.includes(data.managerTopic) ? data.managerTopic : 'Other';
     } else { delete data.managerNote; delete data.managerTopic; }
   } else { delete data.receivedById; delete data.needsManager; }
+  if (type === 'vehicle') {
+    // A short remark beside each checklist item (why it is OK or Not OK). Older apps send none; that is fine.
+    const remarks = isPlainObject(data.vehicleRemarks) ? data.vehicleRemarks : {};
+    data.vehicleRemarks = Object.fromEntries(Object.entries(remarks).slice(0, 40).map(([item, text]) => [String(item).slice(0, 60), String(text ?? '').trim().slice(0, 300)]).filter(([, text]) => text));
+  } else delete data.vehicleRemarks;
   return null;
 }
 
@@ -970,7 +976,7 @@ function announceReport(report, submitter, actorId, before = null) {
   const place = data.area || data.block || data.vehicleId || '';
   if (summary.flagged && !before?.flagged) {
     for (const manager of state.users.filter((user) => isManagerRole(user) && user.active !== false)) {
-      notify(manager.id, { type: 'report_flagged', fromUserId: actorId, title: `Needs attention · ${label}`, body: report.type === 'handover' ? `${submitter.name} · ${data.managerTopic}: ${data.managerNote}` : `${submitter.name}${summary.flaggedCount ? ` · ${summary.flaggedCount} flagged` : ''}${place ? ` · ${place}` : ''}`, link: { page: 'report', id: report.id } });
+      notify(manager.id, { type: 'report_flagged', fromUserId: actorId, title: `Needs attention · ${label}`, body: report.type === 'handover' ? `${submitter.name} · ${data.managerTopic}: ${data.managerNote}` : report.type === 'vehicle' ? `${submitter.name}${place ? ` · ${place}` : ''} · Not OK: ${Object.keys(data.vehicle || {}).filter((item) => data.vehicle[item] === 'Not OK').map((item) => (data.vehicleRemarks?.[item] ? `${item} (${data.vehicleRemarks[item]})` : item)).join(', ')}`.slice(0, 240) : `${submitter.name}${summary.flaggedCount ? ` · ${summary.flaggedCount} flagged` : ''}${place ? ` · ${place}` : ''}`, link: { page: 'report', id: report.id } });
     }
   }
   if (report.type === 'handover' && data.receivedById && data.receivedById !== before?.receivedById) {

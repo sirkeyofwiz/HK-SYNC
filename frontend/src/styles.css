@@ -945,3 +945,86 @@ select.hk-select:invalid { color: var(--slate); }
 /* Goals progress tags, same bands as the Overview: Good 8+, OK 7-7.9, Needs support under 7 */
 .tag.ok { background: var(--accent-soft); color: var(--accent); }
 .tag.support { background: #fbe9e8; color: var(--red); }
+
+/* ---------- Vehicle checklist: remark beside each item ---------- */
+.vehicle-form { display: grid; gap: 10px; }
+.vehicle-form > p { margin: 0 0 4px; }
+.vehicle-item { display: grid; grid-template-columns: minmax(120px, 1fr) auto minmax(180px, 2fr); gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: #fff; }
+.vehicle-item.bad { border-color: #efc4c2; background: #fdf5f4; }
+.vehicle-item > b { font-size: 14px; }
+.vehicle-item input { padding: 9px 11px; }
+.ok-toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.ok-toggle button { background: #fbfcfb; color: var(--slate); padding: 9px 12px; font-size: 13px; font-weight: 700; white-space: nowrap; }
+.ok-toggle button + button { border-left: 1px solid var(--line); }
+.ok-toggle button.on.ok { background: var(--pale); color: var(--green); }
+.ok-toggle button.on.bad { background: #fbe9e8; color: var(--red); }
+.vehicle-form label { font-size: 12px; margin-top: 6px; }
+.vehicle-checks-detail { display: grid; }
+.vehicle-checks-detail > div { display: grid; grid-template-columns: 160px auto 1fr; gap: 6px 14px; align-items: center; padding: 10px 2px; border-bottom: 1px solid var(--line); }
+.vehicle-checks-detail > div:last-child { border-bottom: 0; }
+.vehicle-checks-detail small { color: var(--ink); font-size: 13px; }
+.vehicle-checks-detail .bad small { color: var(--red); }
+.vehicle-checks-detail .badge { justify-self: start; }
+
+/* ---------- Vehicle checks dashboard ---------- */
+.vehicle-dash { display: grid; gap: 18px; margin-top: 18px; }
+.vehicle-period { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; padding: 16px 20px; }
+.period-nav { display: flex; align-items: center; gap: 10px; }
+.period-nav > div { display: grid; min-width: 170px; text-align: center; }
+.period-nav small { color: var(--slate); font-size: 11px; min-height: 16px; }
+.period-nav small .text { font-size: 11px; padding: 0; }
+.period-nav > button { width: 36px; height: 36px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 22px; line-height: 1; }
+.period-nav > button:disabled { opacity: .35; cursor: default; }
+.period-jump { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--slate); }
+.period-jump input { width: auto; padding: 8px 10px; }
+.vehicle-period select { width: auto; padding: 9px 11px; }
+.vehicle-period > .secondary { margin-left: auto; }
+.vehicle-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.vehicle-stats > div { background: #fff; border: 1px solid var(--line); border-radius: 7px; padding: 16px 18px; display: grid; gap: 4px; align-content: start; }
+.vehicle-stats strong { font-size: 28px; letter-spacing: -.8px; line-height: 1.1; overflow-wrap: anywhere; }
+.vehicle-stats small { font-size: 12px; color: var(--slate); }
+.vehicle-stats small:first-child { font: 500 10px 'DM Mono', monospace; letter-spacing: 1.2px; text-transform: uppercase; color: #7c8b84; }
+.chart-key { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11px; color: var(--slate); }
+.chart-key span::before { content: ''; display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.chart-key .ok::before { background: var(--green); }
+.chart-key .bad::before { background: var(--red); }
+.chart-key .none::before { background: var(--line); }
+.day-bars { display: grid; gap: 4px; align-items: end; margin-bottom: 8px; }
+.day-bars button { background: none; padding: 0; display: grid; gap: 3px; justify-items: center; color: var(--slate); min-width: 0; }
+.day-bars button:disabled { cursor: default; }
+.day-bars .bar { height: 130px; width: 100%; max-width: 48px; display: flex; flex-direction: column; justify-content: flex-end; border-radius: 5px; overflow: hidden; }
+.day-bars.month .bar { height: 100px; }
+.day-bars .bar i { display: block; width: 100%; flex: none; }
+.day-bars .bar i.ok { background: var(--green); }
+.day-bars .bar i.bad { background: var(--red); }
+.day-bars .bar i.none { height: 4px; background: var(--line); border-radius: 2px; }
+.day-bars button.picked .bar { outline: 2px solid var(--accent); outline-offset: 2px; }
+.day-bars small { font-size: 10px; min-height: 12px; }
+.item-rows { display: grid; gap: 12px; }
+.item-rows > div { display: grid; grid-template-columns: 150px minmax(0, 1fr) 110px; gap: 4px 14px; align-items: center; font-size: 13px; }
+.item-rows > div > span:last-of-type { text-align: right; font-weight: 700; }
+.item-rows small { grid-column: 2 / -1; color: var(--slate); font-size: 12px; }
+.item-bar { height: 8px; background: var(--pale); border-radius: 4px; overflow: hidden; }
+.item-bar i { display: block; height: 100%; background: var(--red); border-radius: 4px; }
+.vehicle-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; width: 100%; text-align: left; background: none; border-top: 1px solid var(--line); padding: 12px 2px; color: var(--ink); }
+.panel-title + .vehicle-row { border-top: 0; }
+.vehicle-row:hover { background: #f7faf8; }
+.vr-date { display: grid; gap: 2px; }
+.vr-date small { color: var(--slate); font-size: 12px; }
+.vr-problems { grid-column: 1 / -1; color: var(--red); font-size: 12px; }
+@media (max-width: 760px) {
+  .vehicle-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .vehicle-period > .secondary { margin-left: 0; }
+}
+@media (max-width: 640px) {
+  .vehicle-item { grid-template-columns: minmax(0, 1fr) auto; }
+  .vehicle-item input { grid-column: 1 / -1; }
+  .vehicle-checks-detail > div { grid-template-columns: minmax(0, 1fr) auto; }
+  .vehicle-checks-detail small { grid-column: 1 / -1; }
+  .item-rows > div { grid-template-columns: minmax(0, 1fr) auto; }
+  .item-bar { grid-column: 1 / -1; grid-row: 2; }
+  .item-rows small { grid-column: 1 / -1; }
+  .day-bars.month { gap: 2px; }
+  .day-bars.month small { font-size: 9px; }
+  .period-nav > div { min-width: 140px; }
+}
