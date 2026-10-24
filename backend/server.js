@@ -49,9 +49,12 @@ database.exec(`
   CREATE TABLE IF NOT EXISTS chat_groups (id TEXT PRIMARY KEY, data TEXT NOT NULL);
 `);
 const app = express();
+// The web app's public address: always allowed to call the API, and the fallback for links in emails. This is the one
+// place it is written in the API; CLIENT_URL and APP_URL (Railway settings) add to or override it.
+const PRODUCTION_WEB_URL = 'https://bahari-operations-web-production.up.railway.app';
 const allowedOrigins = [...new Set([
   ...(process.env.CLIENT_URL || 'http://localhost:5173,http://127.0.0.1:5173').split(',').map((origin) => origin.trim()).filter(Boolean),
-  'https://bahari-operations-web-production.up.railway.app',
+  PRODUCTION_WEB_URL,
   // The installed Android app (Capacitor serves its bundled files from this address).
   'https://localhost'
 ])];
@@ -185,11 +188,8 @@ if (!state.users || state.users.length === 0) {
 }
 
 // HK Goals Tracker. Managers keep the roster names and SMART targets; every score is calculated from supervisor reports.
-const HK_ROSTER = ['Agness Ramadan', 'Abdallah Hassan', 'Amina Abdalla', 'Amina Said', 'Feisal Abdalla', 'Chrisitna Andrea', 'Clementina Mwapopo',
-  'Diana Ndanshau', 'Dora Godson', 'Elizabeth Antony', 'Elizabeth Petro', 'Sara Mbise', 'Khairat Juma', 'Hajrat Michael', 'Hapsa Omar', 'Hilda Daniel',
-  'Madua Hassan', 'Mariam Khalifan', 'Matilder Richard', 'Anifa', 'Mulfida', 'Mwajuma Seif', 'Mwanaide Ally', 'Nachia Abdallah', 'Nahla Mohammed',
-  'Najma Khamis', 'Pili Omar', 'khadija', 'Salome Festo', 'Shamimu Hassan', 'Sharifa Sharif', 'Sophia Amos', 'Teresia Kassim', 'Nehema', 'Yasinta Alfred',
-  'Zawadi', 'Dorice Edward', 'Maryam Mohammed', 'Zuwena Ally', 'Christina'];
+// The housekeeper list lives in the database and is edited on Goals; a new install starts with none (names are
+// personal data and belong to each hotel, not to the code).
 if (!state.goals.length) {
   const goals = {
     id: 'current',
@@ -199,7 +199,7 @@ if (!state.goals.length) {
       { key: 'organization_supplies', label: 'Organization Supplies', target: 0 },
       { key: 'guest_interaction', label: 'Enhance Guest Interaction', target: 0 }
     ],
-    hkProgress: HK_ROSTER.map((name) => ({ name }))
+    hkProgress: []
   };
   state.goals.push(goals);
   saveRow('goals', goals);
@@ -718,7 +718,7 @@ function setPassword(user, hashedPassword) {
 
 // Password reset links point at the frontend; APP_URL overrides, otherwise the first CLIENT_URL origin.
 const APP_URL = (process.env.APP_URL || (process.env.CLIENT_URL || '').split(',')[0].trim()
-  || (process.env.NODE_ENV === 'production' ? 'https://bahari-operations-web-production.up.railway.app' : 'http://localhost:5173')).replace(/\/+$/, '');
+  || (process.env.NODE_ENV === 'production' ? PRODUCTION_WEB_URL : 'http://localhost:5173')).replace(/\/+$/, '');
 const emailConfigured = Boolean(process.env.RESEND_API_KEY && process.env.EMAIL_FROM);
 // Without email in production nobody could receive a self-service link, so staff are pointed to a manager instead.
 // Development keeps the flow on (the link comes back in the response) so it can be tested locally.
