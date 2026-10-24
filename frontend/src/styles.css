@@ -50,6 +50,17 @@ header { height: 102px; background: #ffffffcc; border-bottom: 1px solid var(--li
 header h1 { font-size: 28px; letter-spacing: -1.2px; margin: 4px 0 0; }
 .sync { display: flex; align-items: center; gap: 16px; color: var(--slate); font-size: 12px; }
 .sync i { width: 7px; height: 7px; background: #51a876; border-radius: 50%; }
+/* Save status: green when everything reached the server, amber while sending, red when offline or a save failed. */
+.save-status { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.save-status.saving i { background: var(--gold); animation: save-pulse 1s ease-in-out infinite; }
+.save-status.offline, .save-status.failed { color: var(--red); font-weight: 600; }
+.save-status.offline i, .save-status.failed i { background: var(--red); }
+@keyframes save-pulse { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .save-status.saving i { animation: none; } }
+/* "Draft saved on this phone" above a report form. */
+.draft-note { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; background: var(--accent-soft); color: var(--navy); padding: 10px 14px; border-radius: 6px; margin-bottom: 18px; font-size: 13px; }
+.draft-note button { background: none; color: var(--accent); font-weight: 700; padding: 0; text-decoration: underline; }
+.draft-note.failed { background: #f6e8e6; color: var(--red); }
 .avatar { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; background: #d2e6d5; color: #23583d; font-size: 12px; font-weight: 800; }
 
 /* ---------- Shared components ---------- */
@@ -564,6 +575,8 @@ button.report-line:hover strong { color: var(--accent); }
 .photo-picker:not(.has-photo) button.photo { padding: 7px 9px; }
 .entry-title h3 { white-space: nowrap; }
 .photo-remove { width: 30px; height: 30px; border-radius: 50%; background: #f6e8e6; color: var(--red, #b42318); font-size: 18px; line-height: 1; padding: 0; }
+.photo-picker span.photo { font-size: 13px; color: var(--slate); padding: 7px 9px; }
+.photo-error { color: var(--red); font-size: 12px; }
 .form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
 .score-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 16px 0; }
 .score-grid label, .vehicle label { font-size: 10px; }
@@ -659,7 +672,8 @@ summary { cursor: pointer; color: var(--green); font-weight: 700; }
   .rail nav button { font-size: 0; }
   .rail nav button b { font-size: 22px; }
   header { padding: 0 20px; }
-  .sync { display: none; }
+  /* Phones: no room for the full line, so the status shows only when something needs attention. */
+  .sync .avatar, .sync .save-status.ok { display: none; }
   main { padding: 30px 18px; }
   .heading { align-items: start; gap: 15px; }
   .heading .primary { white-space: nowrap; }
