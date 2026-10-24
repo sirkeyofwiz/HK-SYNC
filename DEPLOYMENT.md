@@ -25,7 +25,8 @@ The API uses SQLite at `backend/data/bahari.sqlite`. The Render persistent disk 
 
 Production runs on Railway (Hobby plan), whose built-in volume backups need the Pro plan, so the API backs itself up to a Railway Storage Bucket instead.
 
-- Every night after 02:00 hotel time (and about a minute after a deploy if the last backup is over a day old) the API uploads `db/YYYY-MM-DD.sqlite.gz`, a consistent compressed copy of the whole database, plus each chat file once as `files/<id>`.
+- Every night after 02:00 hotel time (and about a minute after a deploy if the last backup is over a day old) the API uploads `db/YYYY-MM-DD.sqlite.gz`, a consistent compressed copy of the whole database, plus each chat file once as `files/<id>` and each report photo once as `photos/<name>`.
+- Report photos are files in `report-photos/` on the volume (the database only names them). Photos are never removed from the bucket, since older database copies may still use them. Database copies made before photos became files hold the photos themselves; restoring one works as before, and the API moves those photos into files when it starts.
 - It keeps the newest 14 daily copies and the first copy of each of the last 12 months. Chat files deleted in the app stay in the bucket for 35 days.
 - The manager (not assistant managers) sees the status on **Account › Data backups**, can run **Back up now**, and can **Download a copy** of the database to keep elsewhere. A backup holds everything, including password hashes, so keep downloaded copies private.
 - Settings on the API service, all Railway variable references to the bucket: `BACKUP_BUCKET`, `BACKUP_ACCESS_KEY_ID`, `BACKUP_SECRET_ACCESS_KEY`, `BACKUP_ENDPOINT`, `BACKUP_REGION`. Without them backups are off and the panel says so.
@@ -34,7 +35,7 @@ Production runs on Railway (Hobby plan), whose built-in volume backups need the 
 
 1. Pick the copy: the bucket's **Files** tab in Railway lists `db/…` files, or use `latest`.
 2. On the API service, add the variable `RESTORE_BACKUP` = `db/2026-10-05.sqlite.gz` (or `latest`) and let it redeploy.
-3. On start the API downloads that copy, moves the current database aside into `before-restore-<time>/` on the volume (nothing is deleted), puts the copy in place and brings back any missing chat files. The deploy log says `RESTORE_BACKUP: restored …`. If the name is wrong or the bucket can't be reached, it logs why and keeps running on the current data.
+3. On start the API downloads that copy, moves the current database aside into `before-restore-<time>/` on the volume (nothing is deleted), puts the copy in place and brings back any missing chat files and report photos. The deploy log says `RESTORE_BACKUP: restored …`. If the name is wrong or the bucket can't be reached, it logs why and keeps running on the current data.
 4. Check the app, then **remove `RESTORE_BACKUP`**. Leaving it set does no harm (the same restore never runs twice), but it is clearer to remove it.
 
 `ALLOW_ANY_REPORT_DATE=1` lifts the 7-days-back report date rule, for example when re-entering old paper reports.
