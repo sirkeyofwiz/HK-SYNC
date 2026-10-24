@@ -1028,3 +1028,18 @@ select.hk-select:invalid { color: var(--slate); }
   .day-bars.month small { font-size: 9px; }
   .period-nav > div { min-width: 140px; }
 }
+
+/* ---------- Driver Overview ---------- */
+.today-check { display: flex; align-items: center; gap: 16px; padding: 18px 22px; margin-top: 18px; border-left: 5px solid var(--gold); }
+.today-check.done { border-left-color: var(--green); }
+.today-check.bad { border-left-color: var(--red); }
+.today-check > div { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.today-check h3 { margin: 2px 0 0; font-size: 18px; }
+.today-check small { color: var(--slate); font-size: 13px; }
+.today-icon { flex: none; display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; font-weight: 800; font-size: 18px; background: #f8efdf; color: var(--gold); }
+.today-check.done .today-icon { background: var(--pale); color: var(--green); }
+.today-check.bad .today-icon { background: #fbe9e8; color: var(--red); }
+@media (max-width: 640px) {
+  .today-check { flex-wrap: wrap; }
+  .today-check > button { width: 100%; }
+}
