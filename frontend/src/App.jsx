@@ -24,13 +24,16 @@ import { TYPES, VEHICLE, emptyEntry, reportKind, typesForRole } from './lib/cons
 import { draftKey, draftTime, dropDraft, loadDraft, saveDraft } from './lib/drafts';
 import { SAVED_FOLDER, compressPhoto, openNativeFile, saveFile } from './lib/files';
 import { localToday, plural } from './lib/format';
+import { MANAGER_PAGES, parseRoute, routePath } from './lib/routes';
 import { ALERT_CHANNEL, IS_IOS, IS_STANDALONE, NATIVE_PUSH, NOTIFY_ICONS, PUSH_SUPPORTED, base64ToBytes, nativePushToken, playChime, pushSubscription } from './lib/push';
 
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem('bahari-token') || '');
   const [user, setUser] = useState(JSON.parse(localStorage.getItem('bahari-user') || 'null'));
-  const [page, setPage] = useState('overview');
+  // The address the app was opened at (a refresh or a shared link) decides the first screen; see lib/routes.js.
+  const [startRoute] = useState(() => parseRoute(window.location));
+  const [page, setPage] = useState(startRoute.page === 'new' ? 'overview' : startRoute.page);
   const [reports, setReports] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [staff, setStaff] = useState([]);
@@ -48,8 +51,8 @@ export default function App() {
   const [goals, setGoals] = useState(null);
   const [performance, setPerformance] = useState(null); // Overview: who is doing well / needs support (managers)
   const [hkRoster, setHkRoster] = useState([]);
-  const [profile, setProfile] = useState(null);
-  const [reportView, setReportView] = useState(null);
+  const [profile, setProfile] = useState(startRoute.profile);
+  const [reportView, setReportView] = useState(startRoute.reportId ? { id: startRoute.reportId, line: null, returnTo: 'reports' } : null);
   // The open report form's draft: which slot it saves to, the form as it opened (a draft is kept only once it differs),
   // and what the note above the form says.
   const draftKeyRef = useRef(null);
@@ -61,7 +64,7 @@ export default function App() {
   const [serverReachable, setServerReachable] = useState(true);
   const [pendingSaves, setPendingSaves] = useState(0);
   const [saveFailed, setSaveFailed] = useState(false);
-  const [taskView, setTaskView] = useState(null);
+  const [taskView, setTaskView] = useState(startRoute.taskId);
   const [askFor, setAskFor] = useState(null);
   const [askVersion, setAskVersion] = useState(0);
   const [alerts, setAlerts] = useState([]);
@@ -72,7 +75,7 @@ export default function App() {
   const notifyPrefsRef = useRef(null);
   const goalsYearRef = useRef(null); // null = the current goals year; set while looking back at a past year
   notifyPrefsRef.current = notifyPrefs;
-  const [activeChat, setActiveChat] = useState(null);
+  const [activeChat, setActiveChat] = useState(startRoute.chatId);
   const [chatMessages, setChatMessages] = useState([]);
   const [resetToken, setResetToken] = useState(() => new URLSearchParams(window.location.search).get('reset') || '');
   // Socket handlers are bound once per login, so they read the open conversation through a ref.
@@ -186,7 +189,7 @@ export default function App() {
     : saveFailed ? { tone: 'failed', text: 'Not sent', help: 'The last change could not be sent. Try it again.' }
     : { tone: 'ok', text: 'All changes saved', help: 'Everything you changed has reached HK SYNC.' };
   const unreadTotal = [...conversations, ...chatGroups].reduce((sum, item) => sum + item.unread, 0);
-  useEffect(() => { if (page === 'messages' && activeChat) openChat(activeChat); }, [page]);
+  useEffect(() => { if (token && page === 'messages' && activeChat) openChat(activeChat); }, [page]);
   // Tell the server whether the app is on screen and which chat is open (decides pop-up vs in-app alert).
   const unreadAlerts = alerts.filter((item) => !item.readAt).length;
   // Android back button in the installed app: close whatever is open, step back to the Overview, and from there put the app in the background.
@@ -213,7 +216,7 @@ export default function App() {
   const signIn = async (event) => { event.preventDefault(); setLoginNotice(''); try { const data = await request('/auth/login', { method: 'POST', body: JSON.stringify(login) }); setLogin((current) => ({ ...current, password: '' })); setToken(data.token); setUser(data.user); localStorage.setItem('bahari-token', data.token); localStorage.setItem('bahari-user', JSON.stringify(data.user)); /* A new sign-in is asked about notifications again (a 'Not now' belonged to the previous one). */ localStorage.removeItem('hk-push-banner'); setBannerHidden(false); } catch (error) { setMessage(error.message); } };
   const forgotPassword = async (email) => { const result = await request('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }); return result.resetToken ? `${result.message} (Development only: open ${window.location.origin}/?reset=${result.resetToken})` : result.message; };
   const completeReset = async (password) => { const result = await request('/auth/reset-password', { method: 'POST', body: JSON.stringify({ token: resetToken, password }) }); window.history.replaceState(null, '', window.location.pathname); setResetToken(''); signOut(); setMessage(''); setLoginNotice(result.message); };
-  const signOut = () => { const signedOutToken = token; if (NATIVE_PUSH) nativePushToken().then((value) => fetch(`${API}/push/unsubscribe`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${signedOutToken}` }, body: JSON.stringify({ token: value }) })).catch(() => {}); pushSubscription().then((subscription) => { if (!subscription) return; fetch(`${API}/push/unsubscribe`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${signedOutToken}` }, body: JSON.stringify({ endpoint: subscription.endpoint }) }).catch(() => {}).finally(() => subscription.unsubscribe().catch(() => {})); }).catch(() => {}); localStorage.removeItem('bahari-token'); localStorage.removeItem('bahari-user'); setToken(''); setUser(null);
+  const signOut = () => { const signedOutToken = token; window.history.replaceState(null, '', '/'); if (NATIVE_PUSH) nativePushToken().then((value) => fetch(`${API}/push/unsubscribe`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${signedOutToken}` }, body: JSON.stringify({ token: value }) })).catch(() => {}); pushSubscription().then((subscription) => { if (!subscription) return; fetch(`${API}/push/unsubscribe`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${signedOutToken}` }, body: JSON.stringify({ endpoint: subscription.endpoint }) }).catch(() => {}).finally(() => subscription.unsubscribe().catch(() => {})); }).catch(() => {}); localStorage.removeItem('bahari-token'); localStorage.removeItem('bahari-user'); setToken(''); setUser(null);
     // A shared phone must not show the next person anything of the last one: notices (a manager's reset link), open pages or cached data.
     setMessage(''); setPage('overview'); setReportView(null); setTaskView(null); setProfile(null); setActiveChat(null); setChatMessages([]); setTaskDraft(null); setAskFor(null); setReports([]); setTasks([]); setStaff([]); setConversations([]); setGoals(null); setPerformance(null); setAlerts([]); setToasts([]); setNotifyPrefs(null); setFilters({ type: '', search: '', date: '' }); goalsYearRef.current = null; };
   const allowedTypes = typesForRole(user?.role);
@@ -272,6 +275,46 @@ const exportExcel = async () => { setMessage('Preparing Excel export…'); const
   const saveGoals = async (section, rows, extra = {}) => { if (goals?.current === false) { setMessage('This is a past year. Switch back to the current year to change targets or the roster.'); return; } const problem = section === 'hkProgress' && rosterProblem(rows); if (problem) { setMessage(problem); return false; } const previous = goals; setGoals((current) => ({ ...current, [section]: rows })); try { const result = await request('/goals', { method: 'PUT', body: JSON.stringify({ [section]: rows, ...extra }) }); setGoals(result.goals); setMessage(result.renamedLines ? `Goals saved. Updated ${plural(result.renamedLines, 'past report line')} to the new name.` : 'Goals saved.'); if (result.renamedLines) refresh(); return true; } catch (error) { setGoals(previous); setMessage(error.message); return false; } };
   const signReport = async (id) => { try { await request(`/reports/${id}/sign`, { method: 'POST' }); refresh(); } catch (error) { setMessage(error.message); } };
   const pageTitle = page === 'overview' ? 'Overview' :page === 'new' ? TYPES[reportType] : page === 'people' ? 'People & performance' : page === 'goals' ? 'Goals & points' : page === 'profile' ? (profile?.kind === 'supervisor' ? 'Supervisor profile' : 'Housekeeper profile') : page === 'report' ? 'Report' : page[0].toUpperCase() + page.slice(1);
+  // ---------- Page addresses (lib/routes.js) ----------
+  // Once signed in, finish opening the address the app started at: a chat's messages, a new report form, a report to edit.
+  const routeStarted = useRef(false);
+  useEffect(() => {
+    if (!token || !user || routeStarted.current) return;
+    routeStarted.current = true;
+    if (startRoute.chatId) openChat(startRoute.chatId);
+    if (startRoute.newType) chooseType(startRoute.newType);
+    if (startRoute.editId) startEdit({ id: startRoute.editId });
+  }, [token, user?.id]);
+  // Manager pages opened by someone else (an old link, a shared address) fall back to the Overview.
+  useEffect(() => { if (user && !isManager && MANAGER_PAGES.includes(page)) setPage('overview'); }, [page, user?.role]);
+  // Write the screen into the address bar: each new screen is a step Back can return to. The first write after signing
+  // in replaces (the address may need tidying); switching type inside a new report form replaces too.
+  const addressWritten = useRef(false);
+  useEffect(() => {
+    if (!token) return;
+    const path = routePath({ page, reportView, profile, activeChat, taskView, reportType, editing });
+    const current = `${window.location.pathname}${window.location.search}`;
+    const replace = !addressWritten.current || (path.startsWith('/reports/new/') && current.startsWith('/reports/new/'));
+    addressWritten.current = true;
+    if (path !== current) window.history[replace ? 'replaceState' : 'pushState'](null, '', path);
+  }, [token, page, reportView?.id, profile?.name, profile?.id, activeChat, taskView, reportType, editing?.id]);
+  // Back / Forward in the browser: show the screen the address names.
+  const showRoute = useRef(null);
+  showRoute.current = (route) => {
+    setTaskView(route.taskId); setTaskDraft(null); setAskFor(null);
+    if (route.page === 'new') {
+      if (route.editId && editing?.id !== route.editId) startEdit({ id: route.editId });
+      else if (route.newType && (page !== 'new' || editing || reportType !== route.newType)) chooseType(route.newType);
+      return;
+    }
+    if (route.page === 'report') setReportView((current) => (current?.id === route.reportId ? current : { id: route.reportId, line: null, returnTo: 'reports' }));
+    if (route.page === 'profile') setProfile(route.profile);
+    if (route.page === 'messages' && route.chatId !== activeChat) openChat(route.chatId);
+    setPage(route.page);
+    window.scrollTo(0, 0);
+  };
+  useEffect(() => { const onPop = () => showRoute.current(parseRoute(window.location)); window.addEventListener('popstate', onPop); return () => window.removeEventListener('popstate', onPop); }, []);
+  useEffect(() => { document.title = token && pageTitle ? `${pageTitle} · HK SYNC` : 'HK SYNC'; }, [pageTitle, token]);
   if (resetToken) return <ResetPassword submit={completeReset} cancel={() => { window.history.replaceState(null, '', window.location.pathname); setResetToken(''); }} />;
   if (!token) return <Login login={login} setLogin={setLogin} signIn={signIn} message={message} notice={loginNotice} forgotPassword={forgotPassword} emailReset={emailReset} clearMessages={() => { setMessage(''); setLoginNotice(''); }} />;
   return <div className="app"><aside className="rail"><div className="property-mark" role="img" aria-label="HK SYNC" /><nav>{[['overview', 'Overview', '⌂'], ['reports', 'Reports', '▤'], ['tasks', 'Tasks', '✓'], ['messages', 'Messages', '✉'], ...(isManager ? [['people', 'People', '↗'], ['goals', 'Goals', '◎']] : []), ['account', 'Account', '⚙']].map(([key, label, icon]) => <button className={page === key ? 'active' : ''} onClick={() => { setMessage(''); setPage(key); window.scrollTo(0, 0); }} key={key}><b>{icon}</b>{label}{key === 'messages' && unreadTotal > 0 && <i className="nav-badge" aria-label={`${unreadTotal} unread`}>{unreadTotal > 99 ? '99+' : unreadTotal}</i>}</button>)}</nav><button className="logout" onClick={signOut} aria-label="Log out" title="Log out"><b>↪</b><span>Log out</span></button></aside><div className="content"><header><div><p className="kicker">HK-SYNC</p><h1>{pageTitle}</h1></div><div className="header-tools"><Bell alerts={alerts} unread={unreadAlerts} open={openAlert} markAll={() => markAlertsRead(null)} /><div className="sync"><span className={`save-status ${saveStatus.tone}`} role="status" title={saveStatus.help}><i />{saveStatus.text}</span><span className="avatar">{user.name.slice(0, 2).toUpperCase()}</span></div></div></header><main>{!bannerHidden && ['default', 'ios-install'].includes(pushState) && <PushBanner state={pushState} enable={async () => { if (await enablePush()) hideBanner(); }} hide={hideBanner} />}{message && <div className="notice">{message}<button onClick={() => setMessage('')}>×</button></div>}{page === 'overview' && user.role === 'driver' && <DriverHome reports={vehicleReports} me={user} openReport={openReport} newChecklist={() => chooseType('vehicle')} exportChecks={(list, period) => exportVehicleChecks(list, period).catch((error) => setMessage(`Excel export failed: ${error.message}`))} />}{page === 'overview' && user.role !== 'driver' && <Overview reports={reports} tasks={tasks} goals={goals} staff={staff} openReport={openReport} chooseType={chooseType} allowedTypes={allowedTypes} isManager={isManager} setPage={setPage} performance={performance} openProfile={openProfile} openSupervisor={openSupervisor} userId={user.id} />}{page === 'reports' && <Reports reports={filteredReports} tabCounts={reportTabCounts} vehicleReports={vehicleReports} exportVehicleChecks={(list, period) => exportVehicleChecks(list, period).catch((error) => setMessage(`Excel export failed: ${error.message}`))} me={user} staff={staff} openReport={openReport} ask={askAbout} openDiscussion={openDiscussion} filters={{ ...filters, tab: reportTab }} setFilters={setFilters} isManager={isManager} setTaskDraft={setTaskDraft} sign={signReport} exportExcel={() => exportExcel().catch((error) => setMessage(`Excel export failed: ${error.message}`))} exportPdf={() => exportPdf().catch((error) => setMessage(`PDF export failed: ${error.message}`))} />}{page === 'tasks' && <Tasks tasks={tasks} staff={staff} isManager={isManager} userId={user.id} role={user.role} setTaskDraft={setTaskDraft} updateStatus={updateTaskStatus} ask={askAbout} openDiscussion={openDiscussion} remove={deleteTask} />}{page === 'account' && <><Account user={user} changePassword={changePassword} signOut={signOut} />{notifyPrefs && <NotificationSettings prefs={notifyPrefs} save={saveNotifyPrefs} isManager={isManager} pushState={pushState} enable={enablePush} disable={disablePush} test={testPush} />}{user.role === 'manager' && <Backups request={request} />}</>}{page === 'goals' && isManager && (goals ? <Goals goals={goals} save={saveGoals} reports={reports} openProfile={openProfile} openSupervisor={openSupervisor} showYear={showGoalsYear} /> : <Empty text="Loading goals…" />)}{page === 'profile' && isManager && profile && (profile.kind === 'supervisor' ? <SupervisorProfile key={profile.id} id={profile.id} name={profile.name} request={request} openReport={openReport} back={() => setPage(profile.returnTo || 'people')} /> : <HkProfile key={profile.name} name={profile.name} request={request} openReport={openReport} back={() => setPage(profile.returnTo || 'people')} />)}{page === 'report' && reportView && <ReportDetail key={`${reportView.id}-${reportView.line?.list}-${reportView.line?.index}`} view={reportView} version={askVersion} me={user} staff={staff} request={request} back={() => setPage(reportView.returnTo || 'reports')} sign={signReport} newTask={setTaskDraft} ask={askAbout} openDiscussion={openDiscussion} onEdit={startEdit} onDeleted={async () => { setPage(reportView.returnTo === 'report' ? 'reports' : reportView.returnTo || 'reports'); await refresh(); setMessage('Report deleted.'); }} />}<datalist id="hk-roster">{hkRoster.map((name) => <option value={name} key={name} />)}</datalist>{page === 'messages' && <Messages me={user} staff={staff} conversations={conversations} groups={chatGroups} groupActions={groupActions} typingWho={typingWho} activeChat={activeChat} openChat={openChat} messages={chatMessages} actions={chatActions} typingIds={typingIds} onOpenShare={openShare} />}{page === 'people' && isManager && <><SupervisorProfileList request={request} openSupervisor={openSupervisor} /><ProfileList request={request} openProfile={openProfile} /><StaffAccounts viewerRole={user.role} staff={staff} form={staffForm} setForm={setStaffForm} submit={createStaff} toggleActive={toggleActive} resetPassword={resetPassword} /></>}{page === 'new' && draftNote && <div className={`draft-note ${draftNote.failed ? 'failed' : ''}`} role="status">{draftNote.failed ? "This phone couldn't keep a draft. Send the report before closing the app." : draftNote.restoredAt ? <>Restored your unsent {editing ? 'changes' : 'report'} from {draftTime(draftNote.restoredAt)}. Changes keep saving on this phone.<button type="button" onClick={startOver}>Start over</button></> : `Draft saved on this phone · ${draftTime(draftNote.savedAt)}`}</div>}{page === 'new' && <ReportForm type={reportType} me={user} report={report} editReport={editReport} editEntry={editEntry} editScore={editScore} addEntry={() => editReport('entries', [...report.entries, emptyEntry(reportType)])} submit={saveReport} chooseType={chooseType} allowedTypes={allowedTypes} staff={staff} editing={editing} cancelEdit={cancelEdit} roster={hkRoster} />}</main></div><ConfirmHost />{taskDraft && <TaskModal draft={taskDraft} setDraft={setTaskDraft} staff={staff} submit={saveTask} />}{taskView && <TaskView id={taskView} version={askVersion} me={user} staff={staff} request={request} close={() => setTaskView(null)} updateStatus={async (id, status) => { await updateTaskStatus(id, status); }} ask={askAbout} openDiscussion={openDiscussion} remove={deleteTask} />}{askFor && <AskDialog ask={askFor} me={user} staff={staff} close={() => setAskFor(null)} send={sendAsk} />}<div className="toasts" aria-live="polite">{toasts.map((alert) => <button type="button" key={alert.id} className="toast" onClick={() => { dismissToast(alert.id); openAlert(alert); }}><span aria-hidden="true">{NOTIFY_ICONS[alert.type] || '🔔'}</span><span><b>{alert.title}</b>{alert.body && <small>{alert.body}</small>}</span></button>)}</div></div>;
