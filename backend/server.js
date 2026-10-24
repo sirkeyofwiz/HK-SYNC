@@ -94,9 +94,15 @@ for (const method of ['get', 'post', 'put', 'patch', 'delete']) {
   const register = app[method].bind(app);
   app[method] = (route, ...handlers) => register(route, ...handlers.map(forwardErrors));
 }
-// Last safety net for anything outside a request (timers, sockets, push): log it, keep serving.
+// Last safety net for anything outside a request (timers, sockets, push). A failed promise (a push that didn't go out)
+// is logged and the server keeps serving. A thrown error can leave memory half-updated, so it is logged, the database
+// is closed properly and the process exits; Railway's restart-on-failure brings a fresh copy up within seconds.
 process.on('unhandledRejection', (error) => console.error('Unhandled rejection:', error));
-process.on('uncaughtException', (error) => console.error('Uncaught exception:', error));
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught exception, restarting:', error);
+  try { database.close(); } catch { /* already closed */ }
+  process.exit(1);
+});
 // Requests are small JSON, except a new report: its photos travel inside it, and 40 MB fits a full inspection with a
 // photo on every line (~100 phone photos). That large limit is only granted after sign-in (see POST /api/reports),
 // so nobody can make the server parse huge bodies on public routes such as sign-in.
@@ -1012,6 +1018,8 @@ app.post('/api/reports', authMiddleware, reportJson, (req, res) => {
 // Reject malformed reports before they are stored: one bad row would otherwise break the report and goals pages for everyone.
 const REPORT_LINE_LIMIT = 200;
 const REPORT_BACKDATE_DAYS = 7;
+const MAX_PHOTO_CHARS = 3 * 1024 * 1024; // ~2.2 MB picture once decoded
+const MAX_REPORT_TEXT_CHARS = 512 * 1024;
 // YYYY-MM-DD in the hotel's time zone, offset by whole days.
 const dateInAppZone = (offsetDays) => new Intl.DateTimeFormat('en-CA', { timeZone: APP_TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(Date.now() + offsetDays * 86400000));
 function reportProblem(date, data, { checkDate = true } = {}) {
@@ -1035,6 +1043,12 @@ function reportProblem(date, data, { checkDate = true } = {}) {
   // A photo is a picture taken in the app, never a link: a web address would make every viewer's browser contact that site.
   const badPhoto = ['entries', 'trolleys', 'pantries'].some((key) => (Array.isArray(data[key]) ? data[key] : []).some((line) => line.photo !== undefined && line.photo !== null && line.photo !== '' && !(typeof line.photo === 'string' && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(line.photo))));
   if (badPhoto) return 'One of the photos is not a valid picture. Remove it and add it again.';
+  // The app shrinks photos to about 200-400 KB; a much bigger one wasn't taken through the app.
+  const hugePhoto = ['entries', 'trolleys', 'pantries'].some((key) => (Array.isArray(data[key]) ? data[key] : []).some((line) => typeof line.photo === 'string' && line.photo.length > MAX_PHOTO_CHARS));
+  if (hugePhoto) return 'One of the photos is too large. Remove it and take it again in the app.';
+  // Everything except photos is short text and scores; a full 200-line inspection is well under this. Reports stay in
+  // memory and in every backup, so nobody can bloat them with extra fields.
+  if (JSON.stringify(withoutPhotos(data)).length > MAX_REPORT_TEXT_CHARS) return 'This report has too much text. Shorten the remarks and try again.';
   if (data.vehicle !== undefined && !isPlainObject(data.vehicle)) return 'The vehicle checklist is not valid.';
   return null;
 }
@@ -1332,10 +1346,18 @@ app.get('/api/tasks/:id', authMiddleware, (req, res) => {
   return res.json({ task: { ...task, assigneeName: nameOf(task.assignedTo), assignedByName: nameOf(task.assignedBy), discussion: discussionIndex(req.user.id).get(`task:${task.id}`) || null, canUpdate: canUpdateTask(viewer, task), canDelete: isManagerRole(viewer) } });
 });
 
+// The choices the app's task form offers; anything else would break sorting and the priority badges.
+const TASK_PRIORITIES = ['low', 'medium', 'urgent'];
+const TASK_TEXT_LIMIT = 200;
+
 app.post('/api/tasks', authMiddleware, requireManager, (req, res) => {
   const { title, location, assignedTo, priority = 'medium', dueDate } = req.body || {};
-  if (!title || !location) return res.status(400).json({ message: 'Task title and location are required.' });
-  const task = { id: randomUUID(), title, location, assignedTo: assignedTo || null, assignedBy: req.user.id, priority, dueDate: dueDate || null, status: 'pending', createdAt: new Date().toISOString() };
+  if (typeof title !== 'string' || typeof location !== 'string' || !title.trim() || !location.trim()) return res.status(400).json({ message: 'Task title and location are required.' });
+  if (title.trim().length > TASK_TEXT_LIMIT || location.trim().length > TASK_TEXT_LIMIT) return res.status(400).json({ message: `Keep the title and location under ${TASK_TEXT_LIMIT} characters.` });
+  if (!TASK_PRIORITIES.includes(priority)) return res.status(400).json({ message: 'Choose a priority: low, medium or urgent.' });
+  if (assignedTo && !state.users.some((user) => user.id === assignedTo && user.active !== false)) return res.status(400).json({ message: 'Choose an active colleague to assign the task to.' });
+  if (dueDate && (typeof dueDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate) || Number.isNaN(Date.parse(dueDate)))) return res.status(400).json({ message: 'Choose a valid due date.' });
+  const task = { id: randomUUID(), title: title.trim(), location: location.trim(), assignedTo: assignedTo || null, assignedBy: req.user.id, priority, dueDate: dueDate || null, status: 'pending', createdAt: new Date().toISOString() };
   state.tasks.push(task);
   saveRow('tasks', task);
   if (task.assignedTo) notify(task.assignedTo, { type: 'task', fromUserId: req.user.id, urgent: task.priority === 'urgent', title: task.priority === 'urgent' ? 'New urgent task' : 'New task', body: `${task.title} · ${task.location}${task.dueDate ? ` · due ${task.dueDate}` : ''}`, link: { page: 'task', id: task.id } });

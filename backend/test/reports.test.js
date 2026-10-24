@@ -99,17 +99,50 @@ test('a deleted report disappears for everyone', async () => {
   assert.ok(!list.body.reports.some((report) => report.id === id));
 });
 
-// Gaps found in the review, fixed in step 2. Marked "todo": they are reported but don't fail the run yet.
-// Once step 2 lands, remove { todo } so they guard the fix.
-test('a task needs a real title and location', { todo: 'step 2: validate new tasks' }, async () => {
-  assert.equal((await server.call('POST', '/api/tasks', { token: manager, body: { title: { not: 'text' }, location: 'Lobby' } })).status, 400);
-  assert.equal((await server.call('POST', '/api/tasks', { token: manager, body: { title: 'x'.repeat(5000), location: 'Lobby' } })).status, 400);
+test('oversized photos and padded-out reports are refused', async () => {
+  const hugePhoto = `data:image/jpeg;base64,${'A'.repeat(3 * 1024 * 1024 + 4)}`;
+  assert.equal((await submit(qualityReport(9, { photo: hugePhoto }))).status, 400);
+  assert.equal((await submit(qualityReport(9, { remarks: 'x'.repeat(600 * 1024) }))).status, 400);
+  const padded = qualityReport(9);
+  padded.data.junk = 'x'.repeat(600 * 1024);
+  assert.equal((await submit(padded)).status, 400, 'extra fields count too');
+  assert.equal((await submit(qualityReport(9, { remarks: 'Stain on the carpet near the balcony door. '.repeat(20) }))).status, 201, 'long real remarks are fine');
 });
 
-test('a task priority must be one the app knows', { todo: 'step 2: validate new tasks' }, async () => {
-  assert.equal((await server.call('POST', '/api/tasks', { token: manager, body: { title: 'Fix tap', location: 'Lobby', priority: 'whenever' } })).status, 400);
+const newTask = (changes) => server.call('POST', '/api/tasks', { token: manager, body: { title: 'Fix tap', location: 'Room 12', priority: 'medium', ...changes } });
+
+test('a task needs a real title and location', async () => {
+  assert.equal((await newTask({ title: { not: 'text' } })).status, 400);
+  assert.equal((await newTask({ title: '   ' })).status, 400);
+  assert.equal((await newTask({ location: ['Lobby'] })).status, 400);
+  assert.equal((await newTask({ title: 'x'.repeat(5000) })).status, 400);
 });
 
-test('a task can only be assigned to an active colleague', { todo: 'step 2: validate new tasks' }, async () => {
-  assert.equal((await server.call('POST', '/api/tasks', { token: manager, body: { title: 'Fix tap', location: 'Lobby', assignedTo: 'nobody' } })).status, 400);
+test('a task priority must be one the app knows', async () => {
+  assert.equal((await newTask({ priority: 'whenever' })).status, 400);
+  for (const priority of ['low', 'medium', 'urgent']) assert.equal((await newTask({ priority })).status, 201);
+});
+
+test('a task can only be assigned to an active colleague', async () => {
+  assert.equal((await newTask({ assignedTo: 'nobody' })).status, 400);
+  const leaver = await createStaff(server, manager, 'driver');
+  await server.call('PATCH', `/api/users/${leaver.user.id}/status`, { token: manager, body: { active: false } });
+  assert.equal((await newTask({ assignedTo: leaver.user.id })).status, 400);
+  assert.equal((await newTask({ assignedTo: supervisor.user.id })).status, 201);
+});
+
+test('a task due date must be a real date, or left blank', async () => {
+  assert.equal((await newTask({ dueDate: 'tomorrow' })).status, 400);
+  assert.equal((await newTask({ dueDate: hotelDate(1) })).status, 201);
+});
+
+test('tasks the app sends today are still accepted', async () => {
+  // The New task form with nobody chosen and no date, and the "＋ Task" follow-up button on a report.
+  const blank = await newTask({ title: 'Check minibar', location: 'Room 7', assignedTo: '', dueDate: '' });
+  assert.equal(blank.status, 201);
+  assert.equal(blank.body.task.assignedTo, null);
+  assert.equal(blank.body.task.dueDate, null);
+  assert.equal((await newTask({ title: 'Quality Checklist follow-up', location: 'Block A', priority: 'urgent', dueDate: hotelDate() })).status, 201);
+  const trimmed = await newTask({ title: '  Fix tap  ' });
+  assert.equal(trimmed.body.task.title, 'Fix tap');
 });
