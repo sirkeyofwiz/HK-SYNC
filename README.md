@@ -18,12 +18,12 @@ HK-SYNC is a housekeeping operations command centre. It brings inspections, shif
 
 - `backend/` - Express API, authentication, SQLite database, and server-side business logic
 - `frontend/` - React and Vite web application
-- `DEPLOYMENT.md` - Detailed Render deployment instructions
-- `render.yaml` - Render Blueprint configuration
+- `backend/test/` - API tests (`npm test` in `backend/`); GitHub runs them and builds the web app on every push
+- `DEPLOYMENT.md` - How the app runs on Railway, its settings, backups and restores
 
 ## Run locally
 
-Prerequisites: Node.js 18 or newer and npm.
+Prerequisites: Node.js 24 and npm.
 
 Install dependencies:
 
@@ -78,9 +78,9 @@ The backend uses these environment variables:
 
 The frontend uses:
 
-- `VITE_API_URL` - public API origin, without the `/api` suffix (production builds fall back to the Railway API URL if it is unset)
+- `VITE_API_URL` - public API origin, without the `/api` suffix (set in `frontend/.env.production` and on Railway; a production build stops if `frontend/Caddyfile` doesn't allow it)
 
-See [DEPLOYMENT.md](DEPLOYMENT.md) for the Render setup and SQLite persistent-disk requirements.
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the Railway setup and SQLite volume requirements.
 
 ## Data
 

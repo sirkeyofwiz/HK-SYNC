@@ -4,8 +4,9 @@ import { Capacitor } from '@capacitor/core';
 import { App as NativeApp } from '@capacitor/app';
 import { PushNotifications } from '@capacitor/push-notifications';
 
-// VITE_API_URL wins (Railway and Render set it); a trailing "/" or "/api" is tolerated. The fallbacks cover builds without it.
-const API_ORIGIN = (import.meta.env.VITE_API_URL || (import.meta.env.PROD ? 'https://bahari-operations-api-production.up.railway.app' : 'http://localhost:5000')).replace(/\/+$/, '').replace(/\/api$/, '');
+// The API's address is the VITE_API_URL setting (Railway's variable, else frontend/.env.production); a trailing "/" or
+// "/api" is tolerated. Without it (local development) the local API is used. vite.config.js checks it at build time.
+const API_ORIGIN = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/+$/, '').replace(/\/api$/, '');
 const API = `${API_ORIGIN}/api`;
 const TYPES = { neglected: 'Neglected Area', quality: 'Quality Checklist', trolley_pantry: 'Trolley / Pantry', handover: 'Shift Handover', vehicle: 'Vehicle Checklist', tools: 'Tools Control', inspection_rate: 'Inspection Rate Program', guest_interaction: 'Guest Interaction Check' };
 const QUALITY = ['Doors / balcony', 'Wardrobe', 'Minibar / cabinet', 'Kettle / tray', 'Bench / tables', 'Fan / AC', 'Bed / phone', 'Wall decor / lamp', 'Curtains', 'Armchair / carpet', 'Desk / TV', 'Mirror / glass', 'Counter / sink', 'Shower', 'Towel holder', 'Toilet / WC', 'Floor / skirting'];

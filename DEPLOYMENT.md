@@ -1,15 +1,18 @@
 # HK SYNC deployment
 
-## Render
+## Railway
 
-1. Push this repository to GitHub.
-2. In Render, choose **New > Blueprint** and select the repository.
-3. Render reads `render.yaml` and creates the API and static frontend.
-4. After the API is created, set its `CLIENT_URL` to the exact frontend URL shown by Render.
-5. Confirm `VITE_API_URL` on the frontend matches the API URL, then redeploy the frontend.
-6. Open the frontend URL and sign in with an account created by the manager.
+Production runs as two Railway services that deploy automatically from `main`:
 
-The API uses SQLite at `backend/data/bahari.sqlite`. The Render persistent disk mounted at `backend/data` keeps the database between deploys. Keep the disk attached to one API instance; move to PostgreSQL before running multiple API instances.
+- **bahari-operations-api** — root directory `/backend`, `npm install`, `node server.js`, health check `/api/health`. A volume holds the SQLite database (`bahari.sqlite`), chat files (`uploads/`) and report photos (`report-photos/`); the API finds it through `RAILWAY_VOLUME_MOUNT_PATH`.
+- **bahari-operations-web** — root directory `/frontend`, `npm install && npm run build`, served from `dist` by Caddy with `frontend/Caddyfile` (security headers and caching).
+
+Keep the API to one instance while it uses SQLite on a volume; move to PostgreSQL before running several.
+
+### Addresses
+
+- The web app finds the API through **`VITE_API_URL`** (the web service's Railway variable; `frontend/.env.production` is the fallback for local builds). If the API's address ever changes, also update `connect-src` in `frontend/Caddyfile`: the production build stops with a message until both agree.
+- The API always accepts the web app's address (`PRODUCTION_WEB_URL` at the top of `backend/server.js`), any origin in `CLIENT_URL`, and the Android app.
 
 ## Required production settings
 

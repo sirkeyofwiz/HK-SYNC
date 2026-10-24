@@ -8,9 +8,8 @@ coverage
 .vite
 .DS_Store
 *.log
-apps/backend/generated
-apps/backend/prisma/dev.db
-apps/backend/prisma/dev.db-journal
+.claude/settings.local.json
+.claude/worktrees/
 
 backend/data/*.sqlite
 backend/data/*.sqlite-shm
