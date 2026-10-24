@@ -2396,6 +2396,9 @@ app.use((req, res) => {
 app.use((error, req, res, next) => {
   if (error.type === 'entity.too.large') return res.status(413).json({ message: 'Upload is too large. Try fewer or smaller photos.' });
   if (error.type === 'entity.parse.failed') return res.status(400).json({ message: 'Invalid request body.' });
+  // Any other unreadable body (bad compression, junk after a compressed body, unknown encoding) is the sender's fault:
+  // answer it plainly instead of logging it as a server failure.
+  if (Number.isInteger(error.status) && error.status >= 400 && error.status < 500) return res.status(error.status).json({ message: 'Invalid request body.' });
   console.error(error);
   return res.status(500).json({ message: 'Something went wrong on the server.' });
 });
