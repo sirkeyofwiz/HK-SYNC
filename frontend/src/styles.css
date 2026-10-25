@@ -1072,3 +1072,38 @@ select.hk-select:invalid { color: var(--slate); }
   .today-check { flex-wrap: wrap; }
   .today-check > button { width: 100%; }
 }
+
+/* ---------- Overview: remarks from inspections ---------- */
+.remarks-panel { margin-top: 18px; }
+.remarks-panel .panel-title { gap: 16px; flex-wrap: wrap; }
+.remarks-panel .panel-title > div:first-child { display: grid; gap: 2px; min-width: 0; flex: 1 1 320px; }
+.remarks-controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.remarks-group { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--slate); cursor: pointer; white-space: nowrap; }
+.remarks-group input { width: auto; margin: 0; }
+.issue-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; font-size: 12px; }
+.issue-chips button { background: #f4f7f5; border: 1px solid var(--line); color: var(--ink); border-radius: 20px; padding: 6px 12px; font-size: 12px; }
+.issue-chips button b { color: var(--red); font-weight: 800; }
+.issue-chips button.active { background: var(--navy); border-color: var(--navy); color: #fff; }
+.issue-chips button.active b { color: #ffb4b0; }
+.issue-chips .text { background: none; border: 0; }
+.remark-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center; border-top: 1px solid var(--line); padding: 10px 0; }
+.remark-list .remark-row:first-child { border-top: 0; }
+.remark-main { display: grid; gap: 3px; text-align: left; background: none; padding: 2px 4px; color: var(--ink); border-radius: 6px; min-width: 0; }
+.remark-main:hover { background: #f7faf8; }
+.remark-main q { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.remark-main small { color: var(--slate); font-size: 12px; overflow-wrap: anywhere; }
+.remark-score { min-width: 44px; text-align: center; font-weight: 800; font-size: 14px; border-radius: 20px; padding: 4px 8px; background: #f1f4f2; color: var(--slate); }
+.remark-score.good { background: var(--pale); color: var(--green); }
+.remark-score.ok { background: var(--accent-soft); color: var(--accent); }
+.remark-score.low { background: #fbe9e8; color: var(--red); }
+.remark-score.inline { min-width: 0; padding: 2px 7px; font-size: 11px; }
+.remark-task { background: var(--accent-soft); color: var(--accent); border-radius: 7px; padding: 7px 10px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.remark-groups { display: grid; gap: 16px; }
+.remark-group { border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px 2px; }
+.remark-group-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; padding-bottom: 8px; }
+.remark-group-head small { color: var(--slate); font-size: 12px; }
+.remarks-more { margin-top: 10px; }
+@media (max-width: 640px) {
+  .remark-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .remark-task { grid-column: 1 / -1; justify-self: start; }
+}

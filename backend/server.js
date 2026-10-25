@@ -402,15 +402,15 @@ const inProfilePeriod = (report, period) => (period === 'all' ? !report.voided :
 
 // Every scored line about a housekeeper, labelled so items from different report types never mix.
 function profileLines(report) {
-  const list = (key) => reportLines(report, key);
+  const list = (key) => reportLines(report, key).map((entry) => ({ entry, list: key, index: report.data[key].indexOf(entry) }));
   switch (report.type) {
-    case 'quality': return list('entries').map((entry) => ({ entry, group: 'Room quality', prefix: '', place: entry.room ? `Room ${entry.room}` : '' }));
-    case 'neglected': return list('entries').map((entry) => ({ entry, group: 'Neglected areas', prefix: 'Neglected: ', place: entry.room || report.data?.area || '' }));
+    case 'quality': return list('entries').map(({ entry, ...at }) => ({ entry, ...at, group: 'Room quality', prefix: '', place: entry.room ? `Room ${entry.room}` : '' }));
+    case 'neglected': return list('entries').map(({ entry, ...at }) => ({ entry, ...at, group: 'Neglected areas', prefix: 'Neglected: ', place: entry.room || report.data?.area || '' }));
     case 'trolley_pantry': return [
-      ...list('trolleys').map((entry) => ({ entry, group: 'Trolley', prefix: 'Trolley: ', place: entry.block ? `Block ${entry.block}` : 'Trolley' })),
-      ...list('pantries').map((entry) => ({ entry, group: 'Pantry', prefix: 'Pantry: ', place: entry.block ? `Block ${entry.block}` : 'Pantry' }))
+      ...list('trolleys').map(({ entry, ...at }) => ({ entry, ...at, group: 'Trolley', prefix: 'Trolley: ', place: entry.block ? `Block ${entry.block}` : 'Trolley' })),
+      ...list('pantries').map(({ entry, ...at }) => ({ entry, ...at, group: 'Pantry', prefix: 'Pantry: ', place: entry.block ? `Block ${entry.block}` : 'Pantry' }))
     ];
-    case 'guest_interaction': return list('entries').map((entry) => ({ entry, group: 'Guest interaction', prefix: '', place: '' }));
+    case 'guest_interaction': return list('entries').map(({ entry, ...at }) => ({ entry, ...at, group: 'Guest interaction', prefix: '', place: '' }));
     default: return [];
   }
 }
@@ -428,15 +428,19 @@ function buildProfiles(period) {
         if (!team.has(label)) team.set(label, []);
         team.get(label).push(value);
       }
-      if (!line.entry?.hkName || !scored.length) continue;
+      // A remark counts even on a line left unscored; guest interaction notes are coaching notes, shown with the checks.
+      const remark = report.type === 'guest_interaction' ? '' : String(line.entry?.remarks || '').trim();
+      if (!line.entry?.hkName || (!scored.length && !remark)) continue;
       const key = nameKey(line.entry.hkName);
-      const person = people.get(key) || { items: new Map(), rooms: [], checks: [] };
+      const person = people.get(key) || { items: new Map(), rooms: [], checks: [], remarks: [] };
       for (const [label, value] of scored) {
         const item = person.items.get(label) || { label, group: line.group, values: [] };
         item.values.push(value);
         person.items.set(label, item);
       }
-      const lineAverage = round1(average(scored.map(([, value]) => value)));
+      const lineAverage = scored.length ? round1(average(scored.map(([, value]) => value))) : null;
+      if (remark) person.remarks.push({ reportId: report.id, line: { list: line.list, index: line.index }, date: report.date, createdAt: report.createdAt || '', type: report.type, place: line.place, block: report.data?.block || report.data?.area || '', score: lineAverage, text: remark, by: userName(report.submittedBy), byId: report.submittedBy });
+      if (!scored.length) { people.set(key, person); continue; }
       if (report.type === 'guest_interaction') {
         person.checks.push({ date: report.date, scores: Object.fromEntries(INTERACTION_ITEMS.map((item) => [item, itemScore(line.entry, item)])), average: lineAverage, note: line.entry.remarks || '' });
       } else {
@@ -449,7 +453,7 @@ function buildProfiles(period) {
 }
 
 function profileFor(name, { people, team }) {
-  const person = people.get(nameKey(name)) || { items: new Map(), rooms: [], checks: [] };
+  const person = people.get(nameKey(name)) || { items: new Map(), rooms: [], checks: [], remarks: [] };
   const items = [...person.items.values()].map((item) => ({ label: item.label, group: item.group, average: round1(average(item.values)), count: item.values.length, team: round1(average(team.get(item.label) || [])) }))
     .sort((a, b) => PROFILE_GROUPS.indexOf(a.group) - PROFILE_GROUPS.indexOf(b.group) || a.average - b.average);
   const rated = items.filter((item) => item.count >= PROFILE_MIN_SCORES);
@@ -468,7 +472,9 @@ function profileFor(name, { people, team }) {
     weaknesses: rated.filter((item) => item.average < WEAKNESS_BELOW).sort((a, b) => a.average - b.average || b.count - a.count).slice(0, 3),
     items,
     trend: [...months.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([month, values]) => ({ month, average: round1(average(values)), rooms: values.length })),
-    flagged: person.rooms.filter((room) => room.average < 6 || room.remarks).reverse().slice(0, 10),
+    // Remarks have their own list now, so flagged rooms are the low-scoring ones.
+    flagged: person.rooms.filter((room) => room.average < 6).reverse().slice(0, 10),
+    remarks: [...person.remarks].reverse().slice(0, 300),
     checks: [...person.checks].reverse().slice(0, 10)
   };
 }
