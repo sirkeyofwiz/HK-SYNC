@@ -391,8 +391,9 @@ const GOALS_SHAPE = {
 };
 
 // ---------- Housekeeper profiles ----------
-// Strength = item averaging 8+, weakness = under 7, each only once scored at least 3 times (user's choice, 2026-10-04).
-const PROFILE_MIN_SCORES = 3;
+// Strength = item averaging 8+, weakness = under 7. One score is enough to judge an item, so a problem is spotted
+// early (user's choice, 2026-10-25; was 3 scores).
+const PROFILE_MIN_SCORES = 1;
 const STRENGTH_AT = 8;
 const WEAKNESS_BELOW = 7;
 const PROFILE_GROUPS = ['Room quality', 'Neglected areas', 'Trolley', 'Pantry', 'Guest interaction'];
@@ -1314,8 +1315,8 @@ app.get('/api/hk-performance', authMiddleware, requireManager, (req, res) => {
     }
   }
   const ranked = [...people.values()].filter((person) => person.rooms >= PERFORMANCE_MIN_ROOMS).map((person) => {
-    // The weakest item (scored at least twice) tells the supervisor what to coach.
-    const weakest = [...person.items.entries()].filter(([, values]) => values.length >= 2).map(([label, values]) => ({ label, average: round1(average(values)) })).sort((a, b) => a.average - b.average)[0] || null;
+    // The weakest item tells the supervisor what to coach.
+    const weakest = [...person.items.entries()].map(([label, values]) => ({ label, average: round1(average(values)) })).sort((a, b) => a.average - b.average)[0] || null;
     return { name: person.name, rooms: person.rooms, average: round1(person.total / person.rooms), lastInspected: person.lastInspected, weakest };
   });
   return res.json({
