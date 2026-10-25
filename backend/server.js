@@ -1285,11 +1285,11 @@ app.get('/api/supervisor-profiles/:id', authMiddleware, requireManager, (req, re
 });
 
 // Overview "Housekeeper performance": who is doing well and who needs support over the last 30 days.
-// A room counts its average score (out of 10), as for HK points. Only roster housekeepers with at least
-// PERFORMANCE_MIN_ROOMS rooms are ranked, so one bad room doesn't put someone on a list. The thresholds match
+// A room counts its average score (out of 10), as for HK points. One inspected room is enough to be listed:
+// inspections rotate week by week, and a bad day should be spotted early so someone can talk to them. The thresholds match
 // the profiles page: 8+ is performing well, under 7 needs support.
 const PERFORMANCE_DAYS = 30;
-const PERFORMANCE_MIN_ROOMS = 3;
+const PERFORMANCE_MIN_ROOMS = 1;
 app.get('/api/hk-performance', authMiddleware, requireManager, (req, res) => {
   const since = dateInAppZone(-(PERFORMANCE_DAYS - 1));
   const roster = new Map(currentRoster().map(({ name }) => [nameKey(name), name]));
