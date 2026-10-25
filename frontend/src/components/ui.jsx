@@ -3,9 +3,16 @@ import { INSPECTION } from '../lib/constants';
 
 // Overview stat cards: a figure, its change since yesterday, and a small chart of the last 7 days.
 // `better` says which direction is good news ('up', or 'down' for problems such as flagged reports).
-export function StatCard({ label, value, delta, better = 'up', note, children }) {
+// Makes a card or row open something when tapped, or with Enter / Space from the keyboard.
+export const clickable = (open) => (open ? { role: 'button', tabIndex: 0, onClick: open, onKeyDown: (event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); open(); } } } : {});
+// A person's name that opens their page; plain text when there is nowhere to go.
+export function NameLink({ name, open }) {
+  if (!open) return <>{name}</>;
+  return <button type="button" className="name-chip" onClick={(event) => { event.stopPropagation(); open(); }}>{name}</button>;
+}
+export function StatCard({ label, value, delta, better = 'up', note, children, onOpen }) {
   const change = delta === undefined ? null : delta === 0 ? 'same' : (delta > 0) === (better === 'up') ? 'good' : 'bad';
-  return <div className="stat-card"><h3>{label}</h3><div className="stat-body"><div className="stat-value">{value}{change && change !== 'same' && <svg className={`stat-arrow ${change}`} viewBox="0 0 12 14" aria-hidden="true"><path d={delta > 0 ? 'M6 1 11 7H8v6H4V7H1z' : 'M6 13 1 7h3V1h4v6h3z'} /></svg>}</div><small className="stat-note">{note ?? (delta === 0 ? 'Same as yesterday' : `${delta > 0 ? '+' : ''}${delta} from yesterday`)}</small><div className="stat-chart">{children}</div></div></div>;
+  return <div className={`stat-card ${onOpen ? 'link' : ''}`} {...clickable(onOpen)}><h3>{label}{onOpen && <span className="go" aria-hidden="true">→</span>}</h3><div className="stat-body"><div className="stat-value">{value}{change && change !== 'same' && <svg className={`stat-arrow ${change}`} viewBox="0 0 12 14" aria-hidden="true"><path d={delta > 0 ? 'M6 1 11 7H8v6H4V7H1z' : 'M6 13 1 7h3V1h4v6h3z'} /></svg>}</div><small className="stat-note">{note ?? (delta === 0 ? 'Same as yesterday' : `${delta > 0 ? '+' : ''}${delta} from yesterday`)}</small><div className="stat-chart">{children}</div></div></div>;
 }
 export function MiniBars({ values, tone }) {
   const id = useId();

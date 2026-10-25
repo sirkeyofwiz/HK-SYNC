@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Empty } from '../../components/ui';
+import { Empty, NameLink, clickable } from '../../components/ui';
 import { TYPES } from '../../lib/constants';
 import { daysAgo, localToday, plural, reportLineLabel } from '../../lib/format';
 
@@ -25,7 +25,7 @@ export function inspectionRemarks(reports) {
       return {
         key: `${report.id}-${list}-${index}`, reportId: report.id, line: { list, index }, text, type: report.type, date: report.date, createdAt: report.createdAt || '',
         label: reportLineLabel(report.type, list, entry, index), place: report.data?.block || report.data?.area || '',
-        person: report.type === 'inspection_rate' ? report.data?.supervisorName || '' : entry.hkName || '', personRole: report.type === 'inspection_rate' ? 'SPV' : 'HK',
+        person: report.type === 'inspection_rate' ? report.data?.supervisorName || '' : entry.hkName || '', personId: report.type === 'inspection_rate' ? report.data?.supervisorId || '' : '', personRole: report.type === 'inspection_rate' ? 'SPV' : 'HK',
         by: report.submitter?.name || '', byId: report.submittedBy, score: values.length ? Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 10) / 10 : null
       };
     }).filter(Boolean));
@@ -35,12 +35,14 @@ export function inspectionRemarks(reports) {
 const whenLabel = (iso) => iso === localToday() ? 'Today' : iso === daysAgo(1) ? 'Yesterday' : new Date(`${iso}T00:00:00`).toLocaleDateString([], { day: 'numeric', month: 'short' });
 const scoreTone = (score) => score === null ? '' : score >= 8 ? 'good' : score >= 7 ? 'ok' : 'low';
 
-function RemarkRow({ remark, openReport, newTask, showPerson = true }) {
+// openHk(name) / openSup(id, name) return what tapping that name does, or null when it opens nothing.
+const nowhere = () => null;
+function RemarkRow({ remark, openReport, newTask, showPerson = true, openHk = nowhere, openSup = nowhere }) {
   return <div className="remark-row">
-    <button type="button" className="remark-main" onClick={() => openReport(remark.reportId, remark.line)} title="Open this room in the report">
+    <div className="remark-main" {...clickable(() => openReport(remark.reportId, remark.line))} title="Open this room in the report">
       <q>{remark.text}</q>
-      <small>{remark.label}{remark.place ? ` · ${remark.place}` : ''} · {TYPES[remark.type]}{showPerson && remark.person ? ` · ${remark.personRole} ${remark.person}` : ''} · by {remark.by || 'Unknown'} · {whenLabel(remark.date)}</small>
-    </button>
+      <small>{remark.label}{remark.place ? ` · ${remark.place}` : ''} · {TYPES[remark.type]}{showPerson && remark.person ? <> · {remark.personRole} <NameLink name={remark.person} open={remark.personRole === 'HK' ? openHk(remark.person) : openSup(remark.personId, remark.person)} /></> : ''} · by <NameLink name={remark.by || 'Unknown'} open={openSup(remark.byId, remark.by)} /> · {whenLabel(remark.date)}</small>
+    </div>
     <span className={`remark-score ${scoreTone(remark.score)}`} title="Average score of this room">{remark.score ?? '—'}</span>
     <button type="button" className="remark-task" onClick={() => newTask({ title: `${remark.label}: ${remark.text}`.slice(0, 100), location: `${remark.label}${remark.place ? ` · ${remark.place}` : ''}`, assignedTo: remark.byId, priority: 'medium', dueDate: localToday() })}>＋ Task</button>
   </div>;
@@ -65,7 +67,7 @@ export function ProfileRemarks({ remarks, period, openReport, newTask }) {
   </section>;
 }
 
-export function RemarksPanel({ reports, openReport, newTask }) {
+export function RemarksPanel({ reports, openReport, newTask, openHk = nowhere, openSup = nowhere }) {
   const [period, setPeriod] = useState('week'); const [issue, setIssue] = useState(''); const [grouped, setGrouped] = useState(false); const [all, setAll] = useState(false);
   const since = daysAgo(PERIODS.find(([key]) => key === period)[2]);
   const inPeriod = inspectionRemarks(reports).filter((remark) => remark.date >= since);
@@ -81,8 +83,8 @@ export function RemarksPanel({ reports, openReport, newTask }) {
       <div className="remarks-controls"><div className="segmented" role="tablist" aria-label="Period">{PERIODS.map(([key, label]) => <button type="button" role="tab" key={key} aria-selected={period === key} className={period === key ? 'active' : ''} onClick={() => { setPeriod(key); setIssue(''); setAll(false); }}>{label}</button>)}</div><label className="remarks-group"><input type="checkbox" checked={grouped} onChange={(e) => { setGrouped(e.target.checked); setAll(false); }} /> Group by housekeeper</label></div></div>
     <IssueChips issues={issueCounts(inPeriod)} issue={issue} pick={(word) => { setIssue(word); setAll(false); }} />
     {!shown.length ? <Empty text={inPeriod.length ? `No remarks mention "${issue}".` : period === 'today' ? 'No remarks written today yet.' : 'No remarks written in this period.'} /> : grouped
-      ? <div className="remark-groups">{visibleGroups.map(([name, list]) => { const average = groupAverage(list); return <div className="remark-group" key={name}><div className="remark-group-head"><b>{name}</b><small>{plural(list.length, 'remark')}{average !== null ? ` · avg room score ` : ''}{average !== null && <span className={`remark-score inline ${scoreTone(average)}`}>{average}</span>}</small></div>{list.map((remark) => <RemarkRow key={remark.key} remark={remark} openReport={openReport} newTask={newTask} showPerson={false} />)}</div>; })}</div>
-      : <div className="remark-list">{(all ? shown : shown.slice(0, LIMIT)).map((remark) => <RemarkRow key={remark.key} remark={remark} openReport={openReport} newTask={newTask} />)}</div>}
+      ? <div className="remark-groups">{visibleGroups.map(([name, list]) => { const average = groupAverage(list); return <div className="remark-group" key={name}><div className="remark-group-head"><b>{name === 'No name given' ? name : <NameLink name={name} open={list[0].personRole === 'HK' ? openHk(name) : openSup(list[0].personId, name)} />}</b><small>{plural(list.length, 'remark')}{average !== null ? ` · avg room score ` : ''}{average !== null && <span className={`remark-score inline ${scoreTone(average)}`}>{average}</span>}</small></div>{list.map((remark) => <RemarkRow key={remark.key} remark={remark} openReport={openReport} newTask={newTask} showPerson={false} openSup={openSup} />)}</div>; })}</div>
+      : <div className="remark-list">{(all ? shown : shown.slice(0, LIMIT)).map((remark) => <RemarkRow key={remark.key} remark={remark} openReport={openReport} newTask={newTask} openHk={openHk} openSup={openSup} />)}</div>}
     {more > 0 && <button type="button" className="text remarks-more" onClick={() => setAll(true)}>{grouped ? `Show ${plural(more, 'more housekeeper')} →` : `Show all ${shown.length} remarks →`}</button>}
     {all && (grouped ? groups.length > 5 : shown.length > LIMIT) && <button type="button" className="text remarks-more" onClick={() => setAll(false)}>Show fewer</button>}
   </section>;

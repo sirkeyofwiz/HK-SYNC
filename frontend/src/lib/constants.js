@@ -7,6 +7,8 @@ export const INTERACTION = [['English level', 'Speaks English well and can inter
 export const VEHICLE = ['Tyres', 'Brakes', 'Lights', 'Horn', 'Mirrors', 'Cleanliness', 'Fuel / charge', 'Body condition', 'Steering', 'First aid kit'];
 // Reports can be dated up to a week back (late paperwork), never in the future; the server enforces the same rule.
 export const REPORT_BACKDATE_DAYS = 7;
+// What an Overview "focus" shows on the Reports page, across every kind of report.
+export const focusMatch = (item, focus) => (!focus.flagged || item.flagged) && (!focus.personId || item.submittedBy === focus.personId) && (!focus.rooms || (item.itemCount > 0 && item.type !== 'guest_interaction'));
 export const reportKind = (report) => (report.type === 'handover' ? 'handovers' : report.type === 'vehicle' ? 'vehicles' : 'reports');
 export const emptyEntry = (type) => type === 'guest_interaction' ? { hkName: '', scores: {}, remarks: '' } : type === 'inspection_rate' ? { room: '', scores: {}, remarks: '' } : type === 'quality' ? { room: '', hkName: '', scores: {}, remarks: '' } : type === 'neglected' ? { room: '', hkName: '', scores: {}, remarks: '' } : type === 'trolley_pantry' ? { block: '', hkName: '', scores: {}, remarks: '' } : { tool: '', quantity: '', status: 'Good', assignedTo: '', remarks: '' };
 export const ROLE_TYPES = { supervisor: ['neglected', 'quality', 'trolley_pantry', 'handover', 'guest_interaction'], storekeeper: ['tools'], driver: ['vehicle'], manager: Object.keys(TYPES), assistant_manager: Object.keys(TYPES) };
