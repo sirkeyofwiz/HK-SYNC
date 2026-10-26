@@ -3,7 +3,17 @@ import { IS_NATIVE } from './push';
 
 // Phone photos are several MB; downscale to JPEG before upload so reports stay well under the API's request size limit.
 // 1280px is still sharp on any phone or laptop screen and about 40% smaller than 1600px, so big inspections fit in one report.
-export const compressPhoto = (file, maxSize = 1280, quality = 0.7) => new Promise((resolve, reject) => { const url = URL.createObjectURL(file); const image = new Image(); image.onload = () => { const scale = Math.min(1, maxSize / Math.max(image.width, image.height)); const canvas = document.createElement('canvas'); canvas.width = Math.round(image.width * scale); canvas.height = Math.round(image.height * scale); canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height); URL.revokeObjectURL(url); resolve(canvas.toDataURL('image/jpeg', quality)); }; image.onerror = () => { URL.revokeObjectURL(url); reject(new Error(`Could not read photo "${file.name}".`)); }; image.src = url; });
+// HEIC / HEIF is the "high efficiency" format of iPhones and some Samsung phones. Browsers can't open it (iPhones convert
+// it to JPEG when sharing to a web page, but files copied over can still be HEIC), so say what to do instead.
+export const isHeic = (file) => /^image\/hei[cf]/i.test(file?.type || '') || /\.(heic|heif)$/i.test(file?.name || '');
+export const HEIC_HELP = 'is a HEIC "high efficiency" photo, which the app can\'t open. Take the picture with the 📷 Camera button instead, or set the phone camera to save JPEG: on Samsung turn off Camera › Settings › "High efficiency pictures"; on iPhone choose Settings › Camera › Formats › "Most Compatible".';
+// The types chat can send, by file name when the phone's file picker doesn't say (some Android pickers leave it blank).
+const FILE_TYPES = { pdf: 'application/pdf', doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', txt: 'text/plain', csv: 'text/csv', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' };
+const SENDABLE = new Set(Object.values(FILE_TYPES));
+export const fileType = (file) => (SENDABLE.has(file.type) ? file.type : FILE_TYPES[String(file.name).split('.').pop().toLowerCase()] || file.type || '');
+// Any other picture the phone can show (BMP, AVIF…) is fine too: it is turned into a JPEG before sending.
+export const canSend = (file) => !isHeic(file) && (SENDABLE.has(fileType(file)) || file.type.startsWith('image/'));
+export const compressPhoto = (file, maxSize = 1280, quality = 0.7) => new Promise((resolve, reject) => { const url = URL.createObjectURL(file); const image = new Image(); image.onload = () => { const scale = Math.min(1, maxSize / Math.max(image.width, image.height)); const canvas = document.createElement('canvas'); canvas.width = Math.round(image.width * scale); canvas.height = Math.round(image.height * scale); canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height); URL.revokeObjectURL(url); resolve(canvas.toDataURL('image/jpeg', quality)); }; image.onerror = () => { URL.revokeObjectURL(url); reject(new Error(isHeic(file) ? `"${file.name}" ${HEIC_HELP}` : `Could not open "${file.name}" as a photo. Try taking it again with the 📷 Camera button.`)); }; image.src = url; });
 export const fileSize = (bytes) => bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 // Attachments need the login token, so they're fetched once and shown from a local object URL.
 export const attachmentUrls = new Map();
