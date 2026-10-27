@@ -1148,3 +1148,98 @@ select.hk-select:invalid { color: var(--slate); }
 .name-edit input { flex: 1; min-width: 0; font-weight: 700; }
 .name-done { white-space: nowrap; padding: 10px 12px; }
 .renamed { display: block; color: var(--gold); font-size: 11px; font-weight: 700; }
+
+/* ---------- Housekeeping store ---------- */
+.store { display: grid; gap: 16px; }
+.store > .heading { margin-bottom: 0; }
+.store-tabs, .store-books { flex-wrap: wrap; justify-self: start; max-width: 100%; }
+.store-books button { font-size: 13px; }
+.store-toast { position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%); z-index: 20; max-width: min(92vw, 520px); padding: 12px 18px; border-radius: 12px; background: var(--navy); color: #fff; font-size: 13px; box-shadow: 0 8px 24px #0003; }
+.store-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-bottom: 14px; }
+.store-bar-actions { margin-left: auto; display: flex; gap: 8px; }
+.store-bar-actions .on { background: var(--navy); color: #fff; }
+.store-month { display: inline-flex; align-items: center; gap: 6px; }
+.store-month input { width: auto; padding: 8px 10px; }
+.store-month button { width: 34px; height: 34px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 20px; line-height: 1; }
+.store-month button:disabled { opacity: .35; cursor: default; }
+.store-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.store-tile { display: grid; gap: 3px; align-content: start; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: #fbfcfb; }
+.store-tile > small:first-child { font: 500 10px "DM Mono", monospace; letter-spacing: 1.2px; text-transform: uppercase; color: #7c8b84; }
+.store-tile strong { font-size: 20px; letter-spacing: -.5px; overflow-wrap: anywhere; }
+.store-tile small { color: var(--slate); font-size: 12px; }
+.store-cats { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0 0 12px; font-size: 12px; color: var(--slate); }
+.store-cats b { color: var(--ink); }
+.store-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+.store-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.store-table th { position: sticky; top: 0; background: #f4f7f5; text-align: left; font: 500 10px "DM Mono", monospace; letter-spacing: 1px; text-transform: uppercase; color: #6b7a74; padding: 10px; white-space: nowrap; }
+.store-table td { padding: 9px 10px; border-top: 1px solid #edf1ed; vertical-align: top; }
+.store-table td small { display: block; color: var(--slate); font-size: 11px; }
+.store-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.store-table tr.quiet td { color: #9aa8a2; }
+.store-table tr.quiet td b { font-weight: 500; }
+.store-table tfoot td { font-weight: 800; background: #f7faf8; border-top: 2px solid var(--line); }
+.store-grid td, .store-grid th { padding: 6px 7px; font-size: 12px; }
+.store-grid td:first-child, .store-grid th:first-child { position: sticky; left: 0; background: #fff; z-index: 1; min-width: 150px; }
+.store-grid th:first-child { background: #f4f7f5; z-index: 2; }
+.store-grid tfoot td:first-child { background: #f7faf8; }
+.store-record-top { display: flex; flex-wrap: wrap; align-items: end; gap: 12px 16px; }
+.store-record-top label { display: grid; gap: 4px; font-size: 12px; color: var(--slate); }
+.store-record-top input { width: auto; min-width: 150px; }
+.store-help { margin: 12px 0; }
+.store-search { margin-bottom: 8px; }
+.store-group { margin-top: 14px; }
+.store-group > .kicker { margin-bottom: 6px; }
+.store-line { display: grid; grid-template-columns: minmax(0, 1fr) 110px; gap: 12px; align-items: center; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 6px; background: #fff; cursor: text; }
+.store-line.has { border-color: #b9d3f0; background: var(--accent-soft); }
+.store-line span { display: grid; min-width: 0; }
+.store-line b { font-size: 14px; overflow-wrap: anywhere; }
+.store-line small { color: var(--slate); font-size: 11px; }
+.store-line input { text-align: right; padding: 9px 10px; font-weight: 700; font-size: 16px; }
+.store-save { position: sticky; bottom: 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 14px; padding: 12px 0 4px; background: #fff; border-top: 1px solid var(--line); font-size: 13px; color: var(--slate); }
+.store-bars { position: relative; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 6px; align-items: end; height: 190px; margin: 6px 0 4px; }
+.store-bars > div { position: relative; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; gap: 4px; }
+.store-bars > div > span { width: 100%; max-width: 42px; background: var(--accent); border-radius: 5px 5px 0 0; min-height: 2px; }
+.store-bars > div > span.over { background: var(--red); }
+.store-bars em { position: absolute; left: 8%; right: 8%; height: 0; border-top: 2px dashed var(--navy); }
+.store-bars small { font-size: 10px; color: var(--slate); height: 14px; }
+.store-bars.stacked .stack { display: flex; flex-direction: column-reverse; overflow: hidden; background: none; }
+.store-bars.stacked .stack i { display: block; width: 100%; min-height: 0; }
+.store-legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 6px 0 14px; font-size: 12px; color: var(--slate); }
+.store-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.store-legend i { display: block; width: 10px; height: 10px; border-radius: 3px; }
+.book-0 { background: #2469ab; }
+.book-1 { background: #147d55; }
+.book-2 { background: #c18d3a; }
+.book-3 { background: #7b5aa6; }
+.store-note { margin: 0 0 12px; font-size: 12px; }
+.store-two { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 18px; }
+.store-rank { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 0; font-size: 13px; }
+.store-rank span { overflow-wrap: anywhere; }
+.store-rank i { display: block; height: 8px; border-radius: 4px; background: var(--accent); }
+.store-rank b { font-variant-numeric: tabular-nums; }
+.store-item-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; align-items: end; padding-bottom: 18px; margin-bottom: 18px; border-bottom: 1px solid var(--line); }
+.store-item-form > .kicker, .store-item-form > small { grid-column: 1 / -1; }
+.store-item-form label { display: grid; gap: 4px; font-size: 12px; color: var(--slate); }
+.store-item-actions { display: flex; gap: 8px; }
+.store-row-actions { white-space: nowrap; text-align: right; }
+.store-row-actions .text { font-size: 12px; margin-left: 8px; }
+.store-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--slate); }
+.store-check input { width: auto; margin: 0; }
+.store-days { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 8px; margin: 8px 0 16px; }
+.store-days label { display: grid; gap: 3px; }
+.store-days small { font-size: 11px; color: var(--slate); }
+.store-days input { padding: 8px; text-align: center; }
+.store-days .future { opacity: .4; }
+.store-month-fields { display: flex; flex-wrap: wrap; align-items: end; gap: 12px 16px; }
+.store-month-fields label { display: grid; gap: 4px; font-size: 12px; color: var(--slate); }
+.store-month-fields input, .store-month-fields select { width: auto; min-width: 170px; }
+.store-budgets fieldset { border: 0; padding: 0; margin: 12px 0 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.store-budgets label { display: grid; gap: 4px; font-size: 12px; color: var(--slate); }
+.store-season-months { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 12px; color: var(--slate); }
+.store-budgets fieldset > .primary { justify-self: start; }
+@media (max-width: 760px) {
+  .store-two { grid-template-columns: 1fr; }
+  .store-bar-actions { margin-left: 0; }
+  .store-line { grid-template-columns: minmax(0, 1fr) 92px; }
+  .store-bars { height: 150px; gap: 3px; }
+}

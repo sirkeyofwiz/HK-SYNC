@@ -10,6 +10,7 @@ import { Server } from 'socket.io';
 import Database from 'better-sqlite3';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import webpush from 'web-push';
+import { registerStore } from './store.js';
 import { backupConfigured, runBackup, listSnapshots, databaseSnapshot, restoreIfRequested, describeError, DAILY_KEEP, MONTHLY_KEEP } from './backup.js';
 
 dotenv.config();
@@ -1164,6 +1165,9 @@ const profilePeriod = (req) => (req.query.period === 'all' ? 'all' : 'year');
 const currentRoster = () => state.goals.find((entry) => entry.id === 'current').hkProgress;
 
 // Names only, for the "HK name" suggestions on report forms (supervisors fill those but can't open Goals).
+// Housekeeping store (items, day sheets, occupancy, budgets, consumption reports): see store.js.
+registerStore(app, { database, authMiddleware, findUser: (id) => state.users.find((user) => user.id === id), today: () => dateInAppZone(0) });
+
 app.get('/api/hk-roster', authMiddleware, (req, res) => {
   return res.json({ names: currentRoster().map((row) => row.name) });
 });
