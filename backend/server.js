@@ -74,7 +74,7 @@ app.use((req, res, next) => {
 });
 // After any successful change to reports, tasks, goals or staff accounts, tell every open app to reload.
 // The signal carries no data: each app re-reads only what its own user is allowed to see.
-const LIVE_CHANGE = /^\/api\/(reports|tasks|goals|users\/staff|users\/[^/]+\/status)(\/|$)/;
+const LIVE_CHANGE = /^\/api\/(reports|tasks|goals|users\/staff|users\/[^/]+\/(status|role))(\/|$)/;
 app.use((req, res, next) => {
   if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && LIVE_CHANGE.test(req.path)) {
     res.on('finish', () => { if (res.statusCode < 400) io.emit('data:changed', { area: req.path.split('/')[2] }); });
@@ -133,6 +133,7 @@ const onlineUsers = new Map(); // userId -> Set of socket ids
 const roleReportTypes = {
   supervisor: ['neglected', 'quality', 'trolley_pantry', 'handover', 'guest_interaction'],
   storekeeper: ['tools'],
+  store_supervisor: ['tools'],
   driver: ['vehicle'],
   manager: ['neglected', 'quality', 'trolley_pantry', 'handover', 'vehicle', 'tools', 'inspection_rate', 'guest_interaction'],
   assistant_manager: ['neglected', 'quality', 'trolley_pantry', 'handover', 'vehicle', 'tools', 'inspection_rate', 'guest_interaction']
@@ -944,7 +945,7 @@ app.get('/api/users/all', authMiddleware, (req, res) => {
 });
 
 // Managers can manage everyone else; assistant managers only field staff, so they can't lock out the manager or each other.
-const FIELD_STAFF_ROLES = ['supervisor', 'driver', 'storekeeper'];
+const FIELD_STAFF_ROLES = ['supervisor', 'driver', 'storekeeper', 'store_supervisor'];
 function canManageRole(actor, role) {
   return actor.role === 'manager' ? role !== 'manager' : FIELD_STAFF_ROLES.includes(role);
 }
@@ -988,6 +989,20 @@ app.patch('/api/users/:id/status', authMiddleware, requireManager, (req, res) =>
   user.active = Boolean(req.body?.active);
   saveRow('users', user);
   if (!user.active) io.in(user.id).disconnectSockets(true);
+  return res.json({ user: sanitizeUser(user) });
+});
+
+// Move an account to another role (e.g. a supervisor who now runs the store). Their past reports, points and messages stay;
+// what they can see and do follows the new role from their next request. Nobody can make a manager or change themselves.
+app.patch('/api/users/:id/role', authMiddleware, requireManager, (req, res) => {
+  const user = state.users.find((entry) => entry.id === req.params.id);
+  const role = req.body?.role;
+  if (!user) return res.status(404).json({ message: 'User not found.' });
+  if (user.id === req.currentUser.id) return res.status(400).json({ message: 'You cannot change your own role.' });
+  if (![...FIELD_STAFF_ROLES, 'assistant_manager'].includes(role)) return res.status(400).json({ message: 'Choose a valid role.' });
+  if (!canManageRole(req.currentUser, user.role) || !canManageRole(req.currentUser, role)) return res.status(403).json({ message: 'You cannot give this account that role.' });
+  user.role = role;
+  saveRow('users', user);
   return res.json({ user: sanitizeUser(user) });
 });
 

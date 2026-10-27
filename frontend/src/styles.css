@@ -1256,3 +1256,7 @@ select.hk-select:invalid { color: var(--slate); }
 .store-files li.bad span { color: var(--red); }
 .store-import-go { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
 .store-import-result { display: grid; gap: 6px; padding: 14px; border-radius: 8px; background: #f4f8f5; }
+
+/* People: change an account's role */
+.role-change { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--slate); }
+.role-change select { width: auto; padding: 6px 8px; font-size: 12px; }

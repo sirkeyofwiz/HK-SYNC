@@ -24,8 +24,9 @@ const KINDS = ['receive', 'adjust', 'use', 'count']; // also the order they appl
 // Budgets as the Excel books set them: chemicals USD 0.35 per guest, or a fixed USD 9,000 (high season) / 6,700 (low
 // season) a month; equipment USD 1,200 of purchases a month. High season: July to February.
 const DEFAULT_SETTINGS = { exchangeRate: 2400, highSeasonMonths: [1, 2, 7, 8, 9, 10, 11, 12], chemicals: { perGuestUsd: 0.35, highSeasonUsd: 9000, lowSeasonUsd: 6700 }, equipment: { monthlyPurchaseUsd: 1200 } };
-const STORE_ROLES = ['storekeeper', 'manager', 'assistant_manager'];
-const MANAGER_ROLES = ['manager', 'assistant_manager'];
+// The store supervisor runs the store: everything a manager can do here, budgets and importing past months included.
+const STORE_ROLES = ['storekeeper', 'store_supervisor', 'manager', 'assistant_manager'];
+const MANAGER_ROLES = ['manager', 'assistant_manager', 'store_supervisor'];
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -57,7 +58,7 @@ export function registerStore(app, { database, authMiddleware, findUser, today }
 
   const storeAccess = (req, res, next) => {
     const user = findUser(req.user.id);
-    if (!user || !STORE_ROLES.includes(user.role)) return res.status(403).json({ message: 'Only the storekeeper and managers can open the store.' });
+    if (!user || !STORE_ROLES.includes(user.role)) return res.status(403).json({ message: 'Only the store team and managers can open the store.' });
     req.storeUser = user;
     next();
   };
@@ -274,7 +275,7 @@ export function registerStore(app, { database, authMiddleware, findUser, today }
   });
 
   app.put('/api/store/settings', authMiddleware, storeAccess, (req, res) => {
-    if (!canManage(req.storeUser)) return res.status(403).json({ message: 'Only managers can change store budgets.' });
+    if (!canManage(req.storeUser)) return res.status(403).json({ message: 'Only managers and the store supervisor can change store budgets.' });
     const body = req.body || {};
     const number = (value, fallback) => { const n = Number(value); return value === undefined ? fallback : Number.isFinite(n) && n >= 0 ? n : NaN; };
     const next = {
@@ -310,7 +311,7 @@ export function registerStore(app, { database, authMiddleware, findUser, today }
   // signed-in manager. Items are matched by book and name; each day sheet keeps the price the book had that month and
   // replaces any sheet for the same book, day and kind, so importing again never adds anything twice.
   app.post('/api/store/import', authMiddleware, express.json({ limit: '20mb' }), storeAccess, (req, res) => {
-    if (!canManage(req.storeUser)) return res.status(403).json({ message: 'Only managers can import past months.' });
+    if (!canManage(req.storeUser)) return res.status(403).json({ message: 'Only managers and the store supervisor can import past months.' });
     const { items: incoming, sheets: incomingSheets, days: incomingDays = {}, months: incomingMonths = {} } = req.body || {};
     if (!Array.isArray(incoming) || !Array.isArray(incomingSheets) || incoming.length > 2000 || incomingSheets.length > 20000 || !isPlainObject(incomingDays) || !isPlainObject(incomingMonths)) return res.status(400).json({ message: 'The import is not in the expected shape.' });
     const now = new Date().toISOString();

@@ -113,3 +113,13 @@ test('a manager imports past months in one go; importing again replaces rather t
   assert.equal((await call('POST', '/import', bad, manager)).status, 400);
   assert.ok(!(await call('GET', '')).body.items.some((item) => item.name === 'Never saved'));
 });
+
+test('a supervisor moved to store supervisor runs the store, budgets included, from their next request', async () => {
+  const lead = await createStaff(server, manager, 'supervisor');
+  assert.equal((await call('GET', '', undefined, lead.token)).status, 403);
+  assert.equal((await server.call('PATCH', `/api/users/${lead.user.id}/role`, { token: storekeeper.token, body: { role: 'store_supervisor' } })).status, 403);
+  assert.equal((await server.call('PATCH', `/api/users/${lead.user.id}/role`, { token: manager, body: { role: 'manager' } })).status, 400);
+  assert.equal((await server.call('PATCH', `/api/users/${lead.user.id}/role`, { token: manager, body: { role: 'store_supervisor' } })).status, 200);
+  assert.equal((await call('GET', '', undefined, lead.token)).body.canManage, true);
+  assert.equal((await call('PUT', '/settings', { exchangeRate: 2400 }, lead.token)).status, 200);
+});

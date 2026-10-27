@@ -11,7 +11,9 @@ export const REPORT_BACKDATE_DAYS = 7;
 export const focusMatch = (item, focus) => (!focus.flagged || item.flagged) && (!focus.personId || item.submittedBy === focus.personId) && (!focus.rooms || (item.itemCount > 0 && item.type !== 'guest_interaction'));
 export const reportKind = (report) => (report.type === 'handover' ? 'handovers' : report.type === 'vehicle' ? 'vehicles' : 'reports');
 export const emptyEntry = (type) => type === 'guest_interaction' ? { hkName: '', scores: {}, remarks: '' } : type === 'inspection_rate' ? { room: '', scores: {}, remarks: '' } : type === 'quality' ? { room: '', hkName: '', scores: {}, remarks: '' } : type === 'neglected' ? { room: '', hkName: '', scores: {}, remarks: '' } : type === 'trolley_pantry' ? { block: '', hkName: '', scores: {}, remarks: '' } : { tool: '', quantity: '', status: 'Good', assignedTo: '', remarks: '' };
-export const ROLE_TYPES = { supervisor: ['neglected', 'quality', 'trolley_pantry', 'handover', 'guest_interaction'], storekeeper: ['tools'], driver: ['vehicle'], manager: Object.keys(TYPES), assistant_manager: Object.keys(TYPES) };
+// How each role is written for people; the stored role names use underscores.
+export const ROLE_NAMES = { supervisor: 'Supervisor', driver: 'Driver', storekeeper: 'Storekeeper', store_supervisor: 'Store supervisor', assistant_manager: 'Assistant Manager', manager: 'Manager' };
+export const ROLE_TYPES = { supervisor: ['neglected', 'quality', 'trolley_pantry', 'handover', 'guest_interaction'], storekeeper: ['tools'], store_supervisor: ['tools'], driver: ['vehicle'], manager: Object.keys(TYPES), assistant_manager: Object.keys(TYPES) };
 export const typesForRole = (role) => ROLE_TYPES[role] || [];
 // The housekeepers a report is about, for the Latest reports list ("Amina Said, Pili Omar +2").
 export const HK_REPORT_TYPES = ['quality', 'neglected', 'trolley_pantry', 'guest_interaction'];
