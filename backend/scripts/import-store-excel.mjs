@@ -10,15 +10,19 @@ const XLSX = createRequire(new URL('../../frontend/package.json', import.meta.ur
 
 const [API, EMAIL, CHEM, AMEN, MINI, STOCK] = process.argv.slice(2);
 if (!STOCK) { console.error('Usage: node scripts/import-store-excel.mjs <api> <email> <chemicals> <amenities> <minibar> <stock>'); process.exit(1); }
-// Reads the password without showing it on screen.
+// Reads the password showing a * per character (so you can see it is typing), never the password itself. Pasting works.
 const askHidden = (question) => new Promise((resolve) => {
   process.stdout.write(question);
   const input = process.stdin; let typed = '';
   input.setRawMode?.(true); input.resume(); input.setEncoding('utf8');
-  const onKey = (key) => {
-    if (key === '\u0003') process.exit(1);
-    if (key === '\r' || key === '\n') { input.setRawMode?.(false); input.pause(); input.off('data', onKey); process.stdout.write('\n'); resolve(typed); return; }
-    typed = key === '\u007f' || key === '\b' ? typed.slice(0, -1) : typed + key;
+  const onKey = (chunk) => {
+    for (const key of chunk) {
+      if (key === '\u0003') { input.setRawMode?.(false); process.stdout.write('\n'); process.exit(1); }
+      if (key === '\r' || key === '\n') { input.setRawMode?.(false); input.pause(); input.off('data', onKey); process.stdout.write('\n'); resolve(typed); return; }
+      if (key === '\u007f' || key === '\b') { if (typed) { typed = typed.slice(0, -1); process.stdout.write('\b \b'); } continue; }
+      if (key < ' ') continue;
+      typed += key; process.stdout.write('*');
+    }
   };
   input.on('data', onKey);
 });
@@ -30,7 +34,10 @@ const call = async (method, route, body) => {
   if (!res.ok) throw new Error(`${method} ${route}: ${data.message || res.status}`);
   return data;
 };
-token = (await call('POST', '/auth/login', { email: EMAIL, password: PASSWORD })).token;
+try { token = (await call('POST', '/auth/login', { email: EMAIL, password: PASSWORD })).token; } catch (error) {
+  console.error(`Could not sign in as ${EMAIL}: ${error.message.replace(/^POST \/auth\/login: /, '')} Nothing was imported.`);
+  process.exit(1);
+}
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 // The books run November 2025 to October 2026.

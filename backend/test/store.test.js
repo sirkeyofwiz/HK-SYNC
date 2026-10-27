@@ -92,3 +92,24 @@ test('saving an empty sheet removes it', async () => {
   await sheet('amenities', today, 'use', { [soap.id]: '' });
   assert.equal((await call('GET', `/day?book=amenities&date=${today}`)).body.sheets.use, null);
 });
+
+test('a manager imports past months in one go; importing again replaces rather than adds; others cannot import', async () => {
+  const payload = {
+    items: [{ key: 'tea', book: 'minibar', name: 'Imported tea', category: 'Tea/Coffee', unit: 'pcs', unitCost: 200 }],
+    sheets: [{ book: 'minibar', date: '2025-12-02', kind: 'use', lines: { tea: { qty: 4, price: 180 } } }],
+    days: { '2025-12-02': 120 },
+    months: { '2025-12': { guests: 500, season: 'high' } }
+  };
+  assert.equal((await call('POST', '/import', payload)).status, 403);
+  assert.equal((await call('POST', '/import', payload, manager)).status, 200);
+  assert.equal((await call('POST', '/import', payload, manager)).status, 200);
+  const december = await report('minibar', '2025-12');
+  const tea = december.items.find((item) => item.name === 'Imported tea');
+  assert.equal(tea.used, 4); // not 8: the second import replaced the same day
+  assert.equal(tea.cost, 720); // at the book's price that month, not today's 200
+  assert.equal(december.kpis.roomNights, 120);
+  // A refused import leaves nothing behind.
+  const bad = { items: [{ key: 'x', book: 'minibar', name: 'Never saved', unitCost: 1 }], sheets: [{ book: 'minibar', date: '2025-11-31', kind: 'use', lines: { x: { qty: 1, price: 1 } } }] };
+  assert.equal((await call('POST', '/import', bad, manager)).status, 400);
+  assert.ok(!(await call('GET', '')).body.items.some((item) => item.name === 'Never saved'));
+});

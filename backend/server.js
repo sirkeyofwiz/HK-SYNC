@@ -114,7 +114,8 @@ process.on('uncaughtException', (error) => {
 // so nobody can make the server parse huge bodies on public routes such as sign-in.
 const smallJson = express.json({ limit: '1mb' });
 const reportJson = express.json({ limit: '40mb' });
-app.use((req, res, next) => (req.method === 'POST' && req.path === '/api/reports' ? next() : smallJson(req, res, next)));
+// A new report and a store import (a year of the Excel store books) bring their own larger limits, after sign-in.
+app.use((req, res, next) => (req.method === 'POST' && ['/api/reports', '/api/store/import'].includes(req.path) ? next() : smallJson(req, res, next)));
 // Railway and Render sit one proxy in front of the app; without this every request's IP is the proxy's.
 app.set('trust proxy', 1);
 

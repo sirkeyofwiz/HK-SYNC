@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Empty } from '../../components/ui';
+import { buildImport, recognise } from './importExcel';
 
 // Housekeeping store: the four store books the team kept in Excel, recorded day by day in the app, with the same
 // monthly and season reports. The server (backend/store.js) does every calculation; these screens record and show.
@@ -251,6 +252,64 @@ function OccupancyTab({ config, request, reload, flash }) {
   </>;
 }
 
+// ---------- Import past months from the Excel store books (managers) ----------
+// The files are read on this device and sent in one request by the manager already signed in, so nothing is typed.
+function ImportTab({ config, request, reload }) {
+  const [files, setFiles] = useState([]); // { name, book, workbook }
+  const [busy, setBusy] = useState('');
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+  const choose = async (list) => {
+    setResult(null); setError(''); setBusy('Reading the files…');
+    try {
+      const XLSX = await import('xlsx');
+      const read = [];
+      for (const file of list) {
+        try { const workbook = XLSX.read(await file.arrayBuffer()); read.push({ name: file.name, book: recognise(XLSX, workbook), workbook }); } catch { read.push({ name: file.name, book: null }); }
+      }
+      // Choosing files again adds to the list; a second copy of the same book replaces the first.
+      setFiles((current) => [...current.filter((file) => !read.some((next) => next.book && next.book === file.book) && !read.some((next) => next.name === file.name)), ...read]);
+    } finally { setBusy(''); }
+  };
+  const books = Object.fromEntries(files.filter((file) => file.book).map((file) => [file.book, file.workbook]));
+  const run = async () => {
+    setError(''); setResult(null);
+    try {
+      const XLSX = await import('xlsx');
+      setBusy('Preparing the import…');
+      const { payload, expected, skipped, disagreements } = buildImport(XLSX, books);
+      setBusy(`Saving ${payload.sheets.length} days of records…`);
+      await request('/store/import', { method: 'POST', body: JSON.stringify(payload) });
+      setBusy('Checking the totals against the books…');
+      const checks = [];
+      for (const entry of expected) {
+        const { report } = await request(`/store/report?book=${entry.book}&month=${entry.month}`);
+        checks.push({ ...entry, app: report.totalCost, match: Math.abs(report.totalCost - entry.value) < 1 });
+      }
+      const missing = new Map();
+      for (const { book, month, day, cost } of skipped) { const key = `${book}|${month}|${day}`; missing.set(key, (missing.get(key) || 0) + cost); }
+      setResult({ checks, missing: [...missing].map(([key, cost]) => { const [book, month, day] = key.split('|'); return { book, month, day, cost }; }), disagreements, counts: { items: payload.items.length, days: payload.sheets.length, rooms: Object.keys(payload.days).length } });
+      await reload();
+    } catch (failure) { setError(failure.message); } finally { setBusy(''); }
+  };
+  const matched = result?.checks.filter((check) => check.match).length;
+  return <section className="panel store-import">
+    <p className="kicker">IMPORT PAST MONTHS</p><h3>From the Excel store books</h3>
+    <p className="muted">Choose the four books (Chemical & Tools, Amenities & Stationery, Minibar, Monthly consumption & stock), all at once or one by one. The app reads them on this device, saves every month, then checks its totals against the books. Importing again replaces the same days; nothing is counted twice.</p>
+    <label className="store-file"><input type="file" multiple accept=".xlsx,.xls" onChange={(e) => { choose([...e.target.files]); e.target.value = ''; }} disabled={Boolean(busy)} /><span>＋ Choose Excel files</span></label>
+    {files.length > 0 && <ul className="store-files">{files.map((file) => <li key={file.name} className={file.book ? 'ok' : 'bad'}><b>{file.name}</b><span>{file.book ? `→ ${config.books[file.book].name}` : 'not a store book this app knows'}</span></li>)}</ul>}
+    {files.length > 0 && <div className="store-import-go"><span className="muted">{Object.keys(books).length} of 4 books chosen</span><button type="button" className="primary" disabled={!Object.keys(books).length || Boolean(busy)} onClick={run}>{busy || `Import ${Object.keys(books).length === 1 ? 'this book' : `these ${Object.keys(books).length} books`}`}</button></div>}
+    {busy && !files.length && <p className="muted">{busy}</p>}
+    {error && <p className="error" role="alert">{error}</p>}
+    {result && <div className="store-import-result" role="status">
+      <p className={matched === result.checks.length ? 'green-text' : ''}><b>Imported {result.counts.items} items, {result.counts.days} days of records and {result.counts.rooms} days of occupied rooms. {matched} of {result.checks.length} monthly totals match the books.</b></p>
+      {result.checks.filter((check) => !check.match).map((check) => <p key={check.book + check.month} className="muted">{config.books[check.book].name}, {monthLabel(check.month)}: book TZS {tzs(check.value)}, app TZS {tzs(check.app)}.</p>)}
+      {result.missing.length > 0 && <p className="muted">Left out because the month has no such day: {result.missing.map((entry) => `${config.books[entry.book].short} ${monthLabel(entry.month)} day ${entry.day} (TZS ${tzs(entry.cost)})`).join(', ')}.</p>}
+      {result.disagreements.length > 0 && <p className="muted">The minibar and amenities books give different occupied rooms on {result.disagreements.length} days; the minibar figure was used.</p>}
+    </div>}
+  </section>;
+}
+
 export function Store({ request, saveExport }) {
   const [config, setConfig] = useState(null);
   const [error, setError] = useState('');
@@ -260,19 +319,20 @@ export function Store({ request, saveExport }) {
   const flash = (text) => { setToast(text); setTimeout(() => setToast(''), 4000); };
   const reload = () => request('/store').then(setConfig).catch((failure) => setError(failure.message));
   useEffect(() => { reload(); }, []);
-  const tabs = useMemo(() => [['record', 'Record'], ['month', 'Month report'], ['season', 'Season'], ['items', 'Items'], ['occupancy', 'Occupancy & budgets']], []);
+  const tabs = useMemo(() => [['record', 'Record'], ['month', 'Month report'], ['season', 'Season'], ['items', 'Items'], ['occupancy', 'Occupancy & budgets'], ...(config?.canManage ? [['import', 'Import']] : [])], [config?.canManage]);
   if (error) return <Empty text={error} />;
   if (!config) return <Empty text="Loading the store…" />;
   const picked = tab === 'season' ? book : book === 'all' ? 'amenities' : book;
   return <div className="store">
-    <div className="heading"><div><p className="kicker">HOUSEKEEPING STORE</p><h2>{tab === 'occupancy' ? 'Occupancy & budgets' : config.books[picked]?.name || 'All store books'}</h2></div></div>
+    <div className="heading"><div><p className="kicker">HOUSEKEEPING STORE</p><h2>{tab === 'occupancy' ? 'Occupancy & budgets' : tab === 'import' ? 'Import from Excel' : config.books[picked]?.name || 'All store books'}</h2></div></div>
     <div className="segmented store-tabs" role="tablist" aria-label="Store">{tabs.map(([key, label]) => <button type="button" role="tab" key={key} aria-selected={tab === key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{label}</button>)}</div>
-    {tab !== 'occupancy' && <BookPicker books={config.books} book={picked} setBook={setBook} all={tab === 'season'} />}
+    {!['occupancy', 'import'].includes(tab) && <BookPicker books={config.books} book={picked} setBook={setBook} all={tab === 'season'} />}
     {tab === 'record' && <RecordTab key={picked} config={config} book={picked} request={request} flash={flash} />}
     {tab === 'month' && <MonthTab config={config} book={picked} request={request} flash={flash} saveExport={saveExport} />}
     {tab === 'season' && <SeasonTab config={config} book={picked} request={request} flash={flash} saveExport={saveExport} />}
     {tab === 'items' && <ItemsTab config={config} book={picked} request={request} reload={reload} flash={flash} />}
     {tab === 'occupancy' && <OccupancyTab config={config} request={request} reload={reload} flash={flash} />}
+    {tab === 'import' && config.canManage && <ImportTab config={config} request={request} reload={reload} />}
     {toast && <div className="store-toast" role="status">{toast}</div>}
   </div>;
 }

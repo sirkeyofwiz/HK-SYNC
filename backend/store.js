@@ -11,6 +11,7 @@
 //   adjust   losses and corrections (+/-)
 //   count    a stock count: the stock at the end of that day, whatever the running figure said
 // Stock = last count + received + adjustments − used. Reports add the sheets up; nothing is kept as a running total.
+import express from 'express';
 import { randomUUID } from 'node:crypto';
 
 export const STORE_BOOKS = {
@@ -303,5 +304,65 @@ export function registerStore(app, { database, authMiddleware, findUser, today }
     }
     if (!bookOf(req.query.book)) return res.status(400).json({ message: 'Choose a store book.' });
     res.json({ season: seasonReport(req.query.book, to) });
+  });
+
+  // Past months from the Excel store books, read in the browser (features/store/importExcel.js) and sent in one go by a
+  // signed-in manager. Items are matched by book and name; each day sheet keeps the price the book had that month and
+  // replaces any sheet for the same book, day and kind, so importing again never adds anything twice.
+  app.post('/api/store/import', authMiddleware, express.json({ limit: '20mb' }), storeAccess, (req, res) => {
+    if (!canManage(req.storeUser)) return res.status(403).json({ message: 'Only managers can import past months.' });
+    const { items: incoming, sheets: incomingSheets, days: incomingDays = {}, months: incomingMonths = {} } = req.body || {};
+    if (!Array.isArray(incoming) || !Array.isArray(incomingSheets) || incoming.length > 2000 || incomingSheets.length > 20000 || !isPlainObject(incomingDays) || !isPlainObject(incomingMonths)) return res.status(400).json({ message: 'The import is not in the expected shape.' });
+    const now = new Date().toISOString();
+    const ids = new Map();
+    const problem = (message) => { throw Object.assign(new Error(message), { status: 400 }); };
+    const run = database.transaction(() => {
+      for (const raw of incoming) {
+        if (!isPlainObject(raw) || !bookOf(raw.book)) problem('An item has no store book.');
+        const name = cleanText(raw.name);
+        const unitCost = Number(raw.unitCost);
+        if (!name || !Number.isFinite(unitCost) || unitCost < 0) problem(`The item "${name || '?'}" needs a name and a price.`);
+        const existing = bookItems(raw.book).find((item) => item.name.toLowerCase() === name.toLowerCase());
+        const par = raw.par === null || raw.par === undefined || raw.par === '' ? existing?.par ?? null : Number(raw.par);
+        const item = { ...(existing || { id: randomUUID(), book: raw.book, createdAt: now, order: bookItems(raw.book).length, active: true }), name, category: cleanText(raw.category) || existing?.category || STORE_BOOKS[raw.book].categories[0], unit: cleanText(raw.unit, 30) || existing?.unit || '', unitCost: money(unitCost), par: Number.isFinite(par) ? par : null, updatedAt: now, updatedBy: req.storeUser.id };
+        items.set(item.id, item); save('items', item);
+        ids.set(String(raw.key), item.id);
+      }
+      for (const raw of incomingSheets) {
+        if (!isPlainObject(raw) || !bookOf(raw.book) || !KINDS.includes(raw.kind) || !isPlainObject(raw.lines)) problem('A day in the import is not valid.');
+        if (!isDate(raw.date) || raw.date > today()) problem(`${raw.date} is not a past date.`);
+        const lines = {};
+        for (const [key, line] of Object.entries(raw.lines)) {
+          const id = ids.get(key);
+          const qty = Number(line?.qty); const price = Number(line?.price);
+          if (!id || items.get(id).book !== raw.book) problem(`An item on ${raw.date} is not in the import's item list.`);
+          if (!Number.isFinite(qty) || !Number.isFinite(price) || price < 0 || (qty < 0 && raw.kind !== 'adjust')) problem(`A quantity on ${raw.date} is not valid.`);
+          lines[id] = { qty: Math.round(qty * 1000) / 1000, price: money(price) };
+        }
+        const id = sheetId(raw.book, raw.date, raw.kind);
+        if (!Object.keys(lines).length) { if (sheets.has(id)) { sheets.delete(id); remove('sheets', id); } continue; }
+        const sheet = { ...(sheets.get(id) || { createdAt: now, createdBy: req.storeUser.id }), id, book: raw.book, date: raw.date, kind: raw.kind, lines, note: cleanText(raw.note, 300), updatedAt: now, updatedBy: req.storeUser.id, imported: true };
+        sheets.set(id, sheet); save('sheets', sheet);
+      }
+      for (const [date, raw] of Object.entries(incomingDays)) {
+        const rooms = Number(raw);
+        if (!isDate(date) || !Number.isInteger(rooms) || rooms < 0) problem(`Occupied rooms on ${date} are not valid.`);
+        const row = { id: date, rooms, updatedAt: now, updatedBy: req.storeUser.id };
+        days.set(date, row); save('days', row);
+      }
+      for (const [month, raw] of Object.entries(incomingMonths)) {
+        if (!MONTH.test(month) || !isPlainObject(raw)) problem(`${month} is not a month.`);
+        const row = { ...(months.get(month) || {}), id: month };
+        if (Number.isInteger(raw.guests) && raw.guests >= 0) row.guests = raw.guests;
+        if (['high', 'low'].includes(raw.season)) row.season = raw.season;
+        months.set(month, row); save('months', row);
+      }
+    });
+    // The in-memory copy is changed alongside the database; if anything is refused, reload both from the database.
+    try { run(); } catch (error) {
+      for (const [map, table] of [[items, 'store_items'], [sheets, 'store_sheets'], [days, 'store_days'], [months, 'store_months']]) { map.clear(); for (const [id, row] of load(table)) map.set(id, row); }
+      return res.status(error.status || 500).json({ message: error.status ? error.message : 'The import could not be saved.' });
+    }
+    res.json({ items: incoming.length, sheets: incomingSheets.length, days: Object.keys(incomingDays).length, months: Object.keys(incomingMonths).length });
   });
 }

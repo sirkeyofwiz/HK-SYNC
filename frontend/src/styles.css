@@ -1243,3 +1243,16 @@ select.hk-select:invalid { color: var(--slate); }
   .store-line { grid-template-columns: minmax(0, 1fr) 92px; }
   .store-bars { height: 150px; gap: 3px; }
 }
+
+/* Store: import from Excel */
+.store-import { display: grid; gap: 12px; }
+.store-import h3, .store-import p { margin: 0; }
+.store-file { justify-self: start; position: relative; display: inline-flex; align-items: center; padding: 12px 18px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-weight: 700; cursor: pointer; }
+.store-file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.store-files { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.store-files li { display: flex; flex-wrap: wrap; gap: 4px 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; }
+.store-files li b { overflow-wrap: anywhere; }
+.store-files li.ok span { color: var(--green); font-weight: 700; }
+.store-files li.bad span { color: var(--red); }
+.store-import-go { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.store-import-result { display: grid; gap: 6px; padding: 14px; border-radius: 8px; background: #f4f8f5; }
