@@ -19,6 +19,8 @@
   color: var(--ink);
   background: #f4f6f3;
   font-synthesis: none;
+  /* Light design only: see the color-scheme meta tag in index.html. */
+  color-scheme: only light;
 }
 
 /* ---------- Base ---------- */
@@ -28,6 +30,10 @@ button, input, select, textarea { font: inherit; }
 button { cursor: pointer; border: 0; }
 input, select, textarea { border: 1px solid var(--line); border-radius: 7px; background: #fbfcfb; padding: 12px 13px; color: var(--ink); outline: none; width: 100%; }
 textarea { min-height: 80px; resize: vertical; }
+/* A drop-down's list is drawn by the phone. Give its rows their own colours so the names stay readable even where the
+   phone paints the list dark (some browsers in dark mode ignore the page's colours). */
+option, optgroup { color: var(--ink); background-color: #fff; }
+option:disabled { color: var(--slate); }
 
 /* ---------- App shell ---------- */
 .app { display: flex; min-height: 100vh; }
@@ -614,6 +620,9 @@ summary { cursor: pointer; color: var(--green); font-weight: 700; }
   .confirm-actions button { width: 100%; }
 }
 .modal { background: #fff; border-radius: 9px; width: min(100%, 500px); padding: 30px; position: relative; display: flex; flex-direction: column; gap: 16px; }
+/* A refusal shown inside a window, right above its button. */
+.form-error { margin: 0; padding: 10px 12px; border-radius: 6px; background: #fbe9e8; color: var(--red); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.modal .primary:disabled { opacity: .6; cursor: default; }
 .modal h2 { margin: 0; }
 .close { position: absolute; right: 18px; top: 13px; background: none; font-size: 24px; color: var(--slate); }
 
