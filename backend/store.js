@@ -38,7 +38,14 @@ const money = (value) => Math.round(value * 100) / 100;
 const daysIn = (ym) => { const [y, m] = ym.split('-').map(Number); return new Date(Date.UTC(y, m, 0)).getUTCDate(); };
 const shiftMonth = (ym, by) => { const [y, m] = ym.split('-').map(Number); const d = new Date(Date.UTC(y, m - 1 + by, 1)); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`; };
 
-export function registerStore(app, { database, authMiddleware, findUser, today }) {
+export function registerStore(app, { database, authMiddleware, findUser, today, enabled = true }) {
+  // The store can be hidden (STORE_ENABLED, see server.js): its data stays, but nothing about it is answered, and the app
+  // asks /api/store/status before showing it anywhere.
+  app.get('/api/store/status', authMiddleware, (req, res) => res.json({ enabled }));
+  if (!enabled) {
+    app.use('/api/store', (req, res) => res.status(404).json({ message: 'Not found.' }));
+    return;
+  }
   database.exec(`
     CREATE TABLE IF NOT EXISTS store_items (id TEXT PRIMARY KEY, data TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS store_sheets (id TEXT PRIMARY KEY, data TEXT NOT NULL);

@@ -8,7 +8,7 @@ let manager;
 let storekeeper;
 let supervisor;
 before(async () => {
-  server = await startServer();
+  server = await startServer({ STORE_ENABLED: 'true' });
   manager = await login(server, MANAGER.email, MANAGER.password);
   storekeeper = await createStaff(server, manager, 'storekeeper');
   supervisor = await createStaff(server, manager, 'supervisor');

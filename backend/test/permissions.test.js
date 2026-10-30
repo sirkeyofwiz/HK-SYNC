@@ -142,3 +142,14 @@ test('private messages stay between the two people', async () => {
   const receiver = await server.call('GET', `/api/messages/${supervisorA.user.id}`, { token: supervisorB.token });
   assert.ok(receiver.body.messages.some((message) => message.text === 'Private note'));
 });
+
+test('the store is hidden unless STORE_ENABLED is on: status says so and every store address is not found', async () => {
+  const hidden = await startServer();
+  try {
+    const token = await login(hidden, MANAGER.email, MANAGER.password);
+    assert.deepEqual((await hidden.call('GET', '/api/store/status', { token })).body, { enabled: false });
+    assert.equal((await hidden.call('GET', '/api/store', { token })).status, 404);
+    assert.equal((await hidden.call('GET', '/api/store/report?book=minibar&month=2026-01', { token })).status, 404);
+    assert.equal((await hidden.call('POST', '/api/store/import', { token, body: { items: [], sheets: [] } })).status, 404);
+  } finally { await hidden.stop(); }
+});

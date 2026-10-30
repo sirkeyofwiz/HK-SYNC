@@ -91,7 +91,10 @@ export default function App() {
   openChatRef.current = page === 'messages' ? activeChat : null;
   const isManager = ['manager', 'assistant_manager'].includes(user?.role);
   // The housekeeping store is for the store team (storekeeper, store supervisor) and managers.
-  const canStore = isManager || ['storekeeper', 'store_supervisor'].includes(user?.role);
+  // It can be hidden on the server (STORE_ENABLED); until the server says it's on, nobody sees it. null = not asked yet.
+  const [storeOn, setStoreOn] = useState(null);
+  const storeRole = isManager || ['storekeeper', 'store_supervisor'].includes(user?.role);
+  const canStore = storeRole && storeOn === true;
   const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
   const request = async (path, options = {}) => { const saving = (options.method || 'GET') !== 'GET'; if (saving) setPendingSaves((count) => count + 1); try { let res; try { res = await fetch(`${API}${path}`, { ...options, headers: { ...headers, ...(options.headers || {}) } }); } catch { if (saving) setSaveFailed(true); const error = new Error(OFFLINE_MESSAGE); error.offline = true; throw error; } if (saving) setSaveFailed(false); const data = await res.json().catch(() => ({})); if (res.status === 401 && !path.startsWith('/auth/')) { signOut(); setMessage('Your session has ended. Please sign in again.'); } if (!res.ok) throw new Error(data.message || (res.status === 413 ? 'Upload is too large. Try fewer or smaller photos.' : `Request failed (${res.status}).`)); return data; } finally { if (saving) setPendingSaves((count) => count - 1); } };
   const refresh = async () => { if (!token) return; lastRefreshRef.current = Date.now(); try { const manager = ['manager', 'assistant_manager'].includes(user?.role); const [r, t, s, g, h, n, np, perf] = await Promise.all([request('/reports'), request('/tasks'), request('/users/all'), manager ? request(goalsYearRef.current ? `/goals?year=${goalsYearRef.current}` : '/goals') : null, request('/hk-roster'), request('/notifications'), request('/users/me/notify'), manager ? request('/hk-performance') : null]); setReports(r.reports || []); setTasks(t.tasks || []); setStaff(s.users || []); setGoals(g?.goals || null); setPerformance(perf || null); setHkRoster(h.names || []); setAlerts(n.notifications || []); setNotifyPrefs(np.settings || null); } catch (error) { setMessage(error.message); } };
@@ -292,7 +295,8 @@ const openProfile = (name) => { setProfile({ name, returnTo: page }); setPage('p
     if (startRoute.editId) startEdit({ id: startRoute.editId });
   }, [token, user?.id]);
   // Manager pages opened by someone else (an old link, a shared address) fall back to the Overview.
-  useEffect(() => { if (user && ((!isManager && MANAGER_PAGES.includes(page)) || (page === 'store' && !canStore))) setPage('overview'); }, [page, user?.role]);
+  useEffect(() => { if (user && ((!isManager && MANAGER_PAGES.includes(page)) || (page === 'store' && !canStore && (!storeRole || storeOn === false)))) setPage('overview'); }, [page, user?.role, storeOn]);
+  useEffect(() => { if (!user || !storeRole) { setStoreOn(null); return; } request('/store/status').then((result) => setStoreOn(result.enabled === true)).catch(() => setStoreOn(false)); }, [user?.id, storeRole]);
   // Write the screen into the address bar: each new screen is a step Back can return to. The first write after signing
   // in replaces (the address may need tidying); switching type inside a new report form replaces too.
   const addressWritten = useRef(false);
