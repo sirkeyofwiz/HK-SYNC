@@ -1265,3 +1265,7 @@ select.hk-select:invalid { color: var(--slate); }
 .line-scores .missing { border: 1px dashed var(--gold); background: #fdf8ee; }
 .line-scores .missing b { color: var(--gold); }
 .line-scores .missing em { display: block; font-style: normal; font-size: 10px; color: var(--gold); font-weight: 700; }
+
+/* Overview remarks: housekeepers / supervisors tabs */
+.remark-audience { margin: -4px 0 14px; flex-wrap: wrap; }
+.remark-audience button small { font-weight: 500; color: var(--slate); }
