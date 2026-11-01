@@ -1,6 +1,8 @@
 export const TYPES = { neglected: 'Neglected Area', quality: 'Quality Checklist', trolley_pantry: 'Trolley / Pantry', handover: 'Shift Handover', vehicle: 'Vehicle Checklist', tools: 'Tools Control', inspection_rate: 'Inspection Rate Program', guest_interaction: 'Guest Interaction Check' };
 export const QUALITY = ['Doors / balcony', 'Wardrobe', 'Minibar / cabinet', 'Kettle / tray', 'Bench / tables', 'Fan / AC', 'Bed / phone', 'Wall decor / lamp', 'Curtains', 'Armchair / carpet', 'Desk / TV', 'Mirror / glass', 'Counter / sink', 'Shower', 'Towel holder', 'Toilet / WC', 'Floor / skirting'];
 // 'Cleaning time' is off the form until the hotel's standard times per room category and status are agreed (14 Oct 2026).
+// Inspection Rate Program pass mark: a room total of 30/50 or more passes (the server flags below it the same way).
+export const IRP_PASS = 30;
 export const INSPECTION = ['Bathroom', 'Bedroom', 'Balcony', 'Maintenance', 'Presentation Room'];
 // Guest Interaction Check criteria (1-10 each) and what each one means.
 export const INTERACTION = [['English level', 'Speaks English well and can interact with guests'], ['Guest approaching', 'Has the skill to approach a guest'], ['Introduction', 'Can introduce themselves to a guest']];

@@ -241,20 +241,28 @@ const sum = (values) => values.reduce((total, value) => total + value, 0);
 const nameKey = (name) => String(name || '').trim().toLowerCase();
 
 // Supervisor points: every room total (out of 50) from Inspection Rate Program reports about them, plus a cumulative history.
+// Supervisor points toward 500: only rooms that pass (30/50 or more, see FLAG_THRESHOLDS) add their total; a failed room
+// adds nothing. The room average still counts every room, so it shows how the supervisor is really doing.
 function supervisorPoints(period) {
+  const passMark = FLAG_THRESHOLDS.inspection_rate * INSPECTION_ITEMS.length;
   const reports = state.reports.filter((report) => report.type === 'inspection_rate' && inGoalPeriod(report, period))
     .sort((a, b) => String(a.date).localeCompare(String(b.date)));
   return state.users.filter((user) => user.role === 'supervisor' && user.active !== false).map((supervisor) => {
     let points = 0;
     let rooms = 0;
+    let passedRooms = 0;
+    let allTotals = 0;
     const history = [];
     for (const report of reports.filter((entry) => entry.data?.supervisorId === supervisor.id)) {
       const totals = scoredEntries(report).map((entry) => scoreValues(entry)).filter((values) => values.length).map(sum);
-      points += sum(totals);
+      const passed = totals.filter((total) => total >= passMark);
+      points += sum(passed);
+      passedRooms += passed.length;
+      allTotals += sum(totals);
       rooms += totals.length;
       history.push({ date: report.date, points });
     }
-    return { id: supervisor.id, name: supervisor.name, points, sessions: history.length, rooms, roomAverage: rooms ? Number((points / rooms).toFixed(1)) : null, lastInspected: history.at(-1)?.date || null, history };
+    return { id: supervisor.id, name: supervisor.name, points, sessions: history.length, rooms, passedRooms, passMark, roomAverage: rooms ? Number((allTotals / rooms).toFixed(1)) : null, lastInspected: history.at(-1)?.date || null, history };
   });
 }
 
@@ -542,8 +550,9 @@ function scoreValues(entry) {
   return Object.values(entry.scores).filter((score) => score !== '' && score !== null).map(Number).filter((score) => Number.isFinite(score));
 }
 
-// Inspection Rate Program rooms under 40/50 (average below 8) must be re-cleaned before check-in.
-const FLAG_THRESHOLDS = { inspection_rate: 8 };
+// Inspection Rate Program: a room passes at 30/50 or more (an average of 6 per item, lowered from 40/50 on 2026-11-01);
+// rooms below that are flagged and must be re-cleaned before check-in. The app uses the same mark (IRP_PASS).
+const FLAG_THRESHOLDS = { inspection_rate: 6 };
 
 // Older reports carry a placeholder `entries` item on every type, so only read the lists that belong to the report type.
 function scoredEntries(report) {

@@ -4,7 +4,7 @@ import { teamAverage } from '../goals/Goals';
 import { VehicleChecks, vehicleName, vehicleProblems } from '../reports/VehicleChecks';
 import { PRIORITY_ORDER, TaskCard } from '../tasks/Tasks';
 import { RemarksPanel } from './Remarks';
-import { HK_REPORT_TYPES, TYPES } from '../../lib/constants';
+import { HK_REPORT_TYPES, IRP_PASS, TYPES } from '../../lib/constants';
 import { dayLabel, daysAgo, deadlineLabel, localToday, plural, reportHousekeepers } from '../../lib/format';
 
 // One housekeeper on the Overview performance lists; tapping opens their profile.
@@ -15,8 +15,8 @@ export function PerformanceRow({ row, tone, openProfile }) {
 export function SupervisorPointsPanel({ goals, setPage, openSupervisor }) {
   const { supervisor: target, deadline } = goals.targets;
   const rows = [...goals.supervisorPoints].sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
-  return <section className="panel performance-panel"><div className="panel-title"><div><p className="kicker">SUPERVISOR POINTS · {goals.year}</p><h3>Progress to {target} points</h3><small className="muted">From Inspection Rate Program rooms (out of 50) · target by {deadlineLabel(deadline)}</small></div><button className="text" onClick={() => setPage('goals')}>View tracker →</button></div>
-    <div className="perf-list sup-points">{rows.map((row) => <button type="button" key={row.id} className={`perf-row ${row.points >= target ? 'good' : 'goal'}`} onClick={() => openSupervisor(row.id, row.name)}><span className="perf-name"><b>{row.name}</b><small>{row.rooms ? `${plural(row.rooms, 'room')} · avg ${row.roomAverage}/50 · last ${row.lastInspected}` : 'Not inspected yet this year'}</small></span><span className="perf-bar" aria-hidden="true"><i style={{ width: `${Math.min(100, row.points / target * 100)}%` }} /></span><strong>{row.points}<small>/{target}</small></strong></button>)}{!rows.length && <Empty text="No active supervisors yet." />}</div></section>;
+  return <section className="panel performance-panel"><div className="panel-title"><div><p className="kicker">SUPERVISOR POINTS · {goals.year}</p><h3>Progress to {target} points</h3><small className="muted">Points from Inspection Rate Program rooms that pass ({IRP_PASS}/50 or more) · target by {deadlineLabel(deadline)}</small></div><button className="text" onClick={() => setPage('goals')}>View tracker →</button></div>
+    <div className="perf-list sup-points">{rows.map((row) => <button type="button" key={row.id} className={`perf-row ${row.points >= target ? 'good' : 'goal'}`} onClick={() => openSupervisor(row.id, row.name)}><span className="perf-name"><b>{row.name}</b><small>{row.rooms ? `${row.passedRooms ?? row.rooms} of ${plural(row.rooms, 'room')} passed · avg ${row.roomAverage}/50 · last ${row.lastInspected}` : 'Not inspected yet this year'}</small></span><span className="perf-bar" aria-hidden="true"><i style={{ width: `${Math.min(100, row.points / target * 100)}%` }} /></span><strong>{row.points}<small>/{target}</small></strong></button>)}{!rows.length && <Empty text="No active supervisors yet." />}</div></section>;
 }
 export function PerformancePanel({ performance, openProfile, setPage }) {
   const { top, support, days, minRooms, goodAt, supportBelow, ranked, inspected } = performance;
