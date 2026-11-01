@@ -1339,3 +1339,24 @@ select.hk-select:invalid { color: var(--slate); }
 .task-overdue { border-color: #efc4c2; background: #fffafa; }
 .overdue-tag { margin-left: 6px; font-size: 10px; font-weight: 800; padding: 3px 8px; border-radius: 20px; background: #fbe9e8; color: var(--red); text-transform: uppercase; letter-spacing: .4px; }
 @media (max-width: 760px) { .filters .period-picker { grid-column: 1 / -1; } }
+
+/* Goals: four targets per housekeeper */
+.hk-target-table { display: grid; gap: 4px; }
+.hk-target-head, .hk-target-row { display: grid; grid-template-columns: minmax(150px, 1.2fr) repeat(4, minmax(0, 1fr)); gap: 12px; align-items: center; }
+.hk-target-head { padding: 6px 4px; font: 500 10px "DM Mono", monospace; letter-spacing: 1px; text-transform: uppercase; color: #6b7a74; }
+.hk-target-head small { display: block; text-transform: none; letter-spacing: 0; font-family: inherit; }
+.hk-target-row { padding: 10px 4px; border-top: 1px solid #edf1ed; }
+.hk-target-row > div:first-child { display: grid; gap: 2px; }
+.hk-target-row > div:first-child small { font-size: 11px; }
+.hk-target-row.done { background: #f5fbf7; }
+.hk-target-cell { display: grid; gap: 4px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.hk-target-cell .cell-label { display: none; }
+.tile-points { display: block; margin-top: 4px; font-size: 11px; color: var(--slate); }
+@media (max-width: 760px) {
+  .hk-target-head { display: none; }
+  .hk-target-row { grid-template-columns: 1fr 1fr; }
+  .hk-target-row > div:first-child { grid-column: 1 / -1; }
+  .hk-target-cell .cell-label { display: block; color: var(--slate); }
+}
+/* The four-target table needs the full width under the supervisor points. */
+.goals-points .hk-targets { grid-column: 1 / -1; }

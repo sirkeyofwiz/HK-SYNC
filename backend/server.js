@@ -234,8 +234,12 @@ function goalYears() {
   const first = state.reports.reduce((earliest, report) => (/^\d{4}-\d{2}-\d{2}$/.test(String(report.date)) ? Math.min(earliest, goalYearOf(report.date)) : earliest), current);
   return Array.from({ length: current - first + 1 }, (_, index) => current - index);
 }
-const POINTS_TARGET = { supervisor: 500, hk: 150 };
-const pointsTargets = (period) => ({ ...POINTS_TARGET, deadline: period.end, periodStart: period.start });
+// Supervisors: 500 points a year from Inspection Rate rooms that pass. Housekeepers: four targets a year, one per
+// category (each score adds up to 10 points): Cleaning, Hygiene and Trolley & Pantry 150 each, Guest interaction 90.
+// A housekeeper reaches their goal when all four are met.
+const POINTS_TARGET = { supervisor: 500 };
+const HK_TARGETS = { cleaning: 150, hygiene: 150, trolleyPantry: 150, guestInteraction: 90 };
+const pointsTargets = (period) => ({ ...POINTS_TARGET, hk: HK_TARGETS, deadline: period.end, periodStart: period.start });
 const inGoalPeriod = (report, period) => !report.voided && String(report.date) >= period.start && String(report.date) <= period.end;
 const HK_POINT_TYPES = ['quality', 'neglected', 'trolley_pantry'];
 const sum = (values) => values.reduce((total, value) => total + value, 0);
@@ -267,30 +271,41 @@ function supervisorPoints(period) {
   });
 }
 
-// HK points: each inspected room adds its average score (max 10), whichever report type it came from,
-// so a 17-box Quality Checklist room counts the same as a 3-box Neglected Area room.
+// HK points per category: a Quality Checklist room adds its cleaning score (room average) and its hygiene score
+// (bathroom items); a Neglected Area line its "Cleaning" and "Hygiene"; a Trolley / Pantry line its average; a Guest
+// Interaction Check the average of its three criteria. Each is out of 10, so 150 points is e.g. 15 rooms at 10/10.
 function hkPoints(roster, period) {
   const totals = new Map();
+  const add = (name, category, value) => {
+    if (value === null || value === undefined || !Number.isFinite(value)) return false;
+    const key = nameKey(name);
+    const row = totals.get(key) || { name: String(name).trim(), rooms: 0, categories: Object.fromEntries(Object.keys(HK_TARGETS).map((column) => [column, { points: 0, count: 0 }])) };
+    row.categories[category].points += value;
+    row.categories[category].count += 1;
+    totals.set(key, row);
+    return true;
+  };
   for (const report of state.reports) {
-    if (!inGoalPeriod(report, period) || !HK_POINT_TYPES.includes(report.type)) continue;
+    if (!inGoalPeriod(report, period)) continue;
     for (const entry of scoredEntries(report)) {
-      const values = scoreValues(entry);
-      if (!entry.hkName || !values.length) continue;
-      const key = nameKey(entry.hkName);
-      const current = totals.get(key) || { name: String(entry.hkName).trim(), points: 0, rooms: 0 };
-      current.points += sum(values) / values.length;
-      current.rooms += 1;
-      totals.set(key, current);
+      if (!entry.hkName) continue;
+      if (report.type === 'guest_interaction') { const values = itemScores(entry, INTERACTION_ITEMS); add(entry.hkName, 'guestInteraction', values.length ? average(values) : null); continue; }
+      if (!HK_POINT_TYPES.includes(report.type)) continue;
+      const values = progressValues(report, entry);
+      const counted = ['cleaning', 'hygiene', 'trolleyPantry'].map((column) => add(entry.hkName, column, values[column])).some(Boolean);
+      if (counted) totals.get(nameKey(entry.hkName)).rooms += 1;
     }
   }
-  const rows = roster.map((person) => {
-    const found = totals.get(nameKey(person.name));
-    totals.delete(nameKey(person.name));
-    return { name: person.name, points: Number((found?.points || 0).toFixed(1)), rooms: found?.rooms || 0, onRoster: true };
-  });
+  const shape = (found, name, onRoster) => {
+    const categories = Object.fromEntries(Object.entries(HK_TARGETS).map(([column, target]) => { const points = Number((found?.categories[column].points || 0).toFixed(1)); return [column, { points, count: found?.categories[column].count || 0, target, met: points >= target }]; }));
+    const met = Object.values(categories).filter((category) => category.met).length;
+    // How far along all four are, 0–100 (each category counts up to its target).
+    const progress = Math.round((Object.values(categories).reduce((sum, category) => sum + Math.min(1, category.points / category.target), 0) / Object.keys(HK_TARGETS).length) * 100);
+    return { name, rooms: found?.rooms || 0, categories, met, done: met === Object.keys(HK_TARGETS).length, progress, onRoster };
+  };
+  const rows = roster.map((person) => { const found = totals.get(nameKey(person.name)); totals.delete(nameKey(person.name)); return shape(found, person.name, true); });
   // Names typed in reports that don't match the roster (often typos) are listed separately, not counted in the pass rate.
-  const unmatched = [...totals.values()].map((entry) => ({ ...entry, points: Number(entry.points.toFixed(1)), onRoster: false }));
-  return [...rows, ...unmatched];
+  return [...rows, ...[...totals.values()].map((found) => shape(found, found.name, false))];
 }
 
 // Housekeeping progress columns, each an average of 1-10 scores from supervisor reports:
@@ -1227,7 +1242,7 @@ app.get('/api/hk-profiles/:name', authMiddleware, requireManager, (req, res) => 
   const points = goals.hkPoints.find((row) => nameKey(row.name) === nameKey(name));
   return res.json({
     period,
-    profile: { ...profileFor(name, buildProfiles(period)), onRoster: Boolean(progress), progress: progress?.scores || null, interaction: progress?.interaction || null, points: { points: points?.points || 0, target: goals.targets.hk, deadline: goals.targets.deadline } },
+    profile: { ...profileFor(name, buildProfiles(period)), onRoster: Boolean(progress), progress: progress?.scores || null, interaction: progress?.interaction || null, points: { categories: points?.categories || null, met: points?.met || 0, targets: goals.targets.hk, deadline: goals.targets.deadline } },
     rules: { minScores: PROFILE_MIN_SCORES, strengthAt: STRENGTH_AT, weaknessBelow: WEAKNESS_BELOW }
   });
 });
