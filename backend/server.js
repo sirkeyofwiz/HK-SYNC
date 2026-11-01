@@ -1074,6 +1074,13 @@ function prepareReportData(type, data, submitter) {
     const evaluated = state.users.find((user) => user.id === data.supervisorId && user.role === 'supervisor' && user.active !== false);
     if (!evaluated) return 'Choose the supervisor being evaluated.';
     data.supervisorName = evaluated.name;
+    // Every room is out of 50, so all five items must be scored: an empty one used to count as 0 and was hidden on the report.
+    const rooms = Array.isArray(data.entries) ? data.entries : [];
+    if (!rooms.length) return 'Add at least one room.';
+    for (const [index, room] of rooms.entries()) {
+      const missing = INSPECTION_ITEMS.filter((item) => [undefined, null, ''].includes(room?.scores?.[item]));
+      if (missing.length) return `${room?.room ? `Room ${room.room}` : `Room ${index + 1}`}: score ${missing.join(', ')}. All five items are needed.`;
+    }
   }
   if (type === 'handover') {
     if (data.receivedById && !handoverReceiver(data, submitter.id)) return 'Choose who is receiving the handover.';

@@ -1260,3 +1260,8 @@ select.hk-select:invalid { color: var(--slate); }
 /* People: change an account's role */
 .role-change { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--slate); }
 .role-change select { width: auto; padding: 6px 8px; font-size: 12px; }
+
+/* Inspection Rate Program: an item left empty on an older report */
+.line-scores .missing { border: 1px dashed var(--gold); background: #fdf8ee; }
+.line-scores .missing b { color: var(--gold); }
+.line-scores .missing em { display: block; font-style: normal; font-size: 10px; color: var(--gold); font-weight: 700; }
