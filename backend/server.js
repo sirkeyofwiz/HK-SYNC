@@ -11,6 +11,7 @@ import Database from 'better-sqlite3';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import webpush from 'web-push';
 import { registerStore } from './store.js';
+import { registerSupport } from './support.js';
 import { backupConfigured, runBackup, listSnapshots, databaseSnapshot, restoreIfRequested, describeError, DAILY_KEEP, MONTHLY_KEEP } from './backup.js';
 
 dotenv.config();
@@ -1197,6 +1198,9 @@ const profilePeriod = (req) => (req.query.period === 'all' ? 'all' : 'year');
 const currentRoster = () => state.goals.find((entry) => entry.id === 'current').hkProgress;
 
 // Names only, for the "HK name" suggestions on report forms (supervisors fill those but can't open Goals).
+// Support plan on profiles: what managers did to help someone who needs attention, and how it turned out. See support.js.
+const support = registerSupport(app, { database, authMiddleware, requireManager, userName: (id) => userName(id), today: () => dateInAppZone(0) });
+
 // Housekeeping store (items, day sheets, occupancy, budgets, consumption reports): see store.js. Hidden until
 // STORE_ENABLED=true is set (Railway variable on the API): its data is kept, but the app shows nothing of it.
 registerStore(app, { database, authMiddleware, findUser: (id) => state.users.find((user) => user.id === id), today: () => dateInAppZone(0), enabled: process.env.STORE_ENABLED === 'true' });
@@ -1397,6 +1401,7 @@ app.put('/api/goals', authMiddleware, requireManager, (req, res) => {
     const fromKey = nameKey(rename?.from);
     const to = cleanName(rename?.to);
     if (!fromKey || !to || fromKey === nameKey(to) || !goals.hkProgress.some((row) => nameKey(row.name) === nameKey(to))) continue;
+    support.renameHousekeeper(rename.from, to);
     for (const report of state.reports) {
       let changed = false;
       for (const list of ['entries', 'trolleys', 'pantries']) {

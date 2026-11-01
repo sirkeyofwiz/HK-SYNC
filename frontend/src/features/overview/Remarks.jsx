@@ -53,7 +53,7 @@ function RemarkRow({ remark, openReport, newTask, showPerson = true, openHk = no
   </div>;
 }
 
-const issueCounts = (remarks) => ISSUES.map(([word, pattern]) => [word, remarks.filter((remark) => pattern.test(remark.text)).length]).filter(([, count]) => count).sort((a, b) => b[1] - a[1]).slice(0, 8);
+export const issueCounts = (remarks) => ISSUES.map(([word, pattern]) => [word, remarks.filter((remark) => pattern.test(remark.text)).length]).filter(([, count]) => count).sort((a, b) => b[1] - a[1]).slice(0, 8);
 const withIssue = (remarks, issue) => { const pattern = ISSUES.find(([word]) => word === issue)?.[1]; return pattern ? remarks.filter((remark) => pattern.test(remark.text)) : remarks; };
 function IssueChips({ issues, issue, pick }) {
   if (!issues.length) return null;
