@@ -1299,3 +1299,30 @@ select.hk-select:invalid { color: var(--slate); }
 .support-item-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 4px; }
 .support-item-actions .secondary { padding: 7px 12px; font-size: 12px; }
 .support-item-actions .text { font-size: 12px; }
+
+/* Overview daily score: bars, any week or month */
+.trend-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 2px 0 8px; }
+.trend-nav { display: inline-flex; align-items: center; gap: 8px; }
+.trend-nav b { font-size: 13px; min-width: 120px; text-align: center; }
+.trend-nav button { width: 30px; height: 30px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 18px; line-height: 1; }
+.trend-nav button:disabled { opacity: .35; cursor: default; }
+.trend-jump { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--slate); }
+.trend-jump input { width: auto; padding: 6px 8px; font-size: 12px; }
+.trend-legend li.none { opacity: .55; }
+.trend-legend li.none b { font-weight: 500; color: var(--slate); }
+.trend-bar { fill: var(--c); }
+.trend-focus { fill: #eef4fb; }
+.trend-hit { cursor: pointer; }
+.trend-day { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; margin-top: 6px; padding: 10px 12px; border-radius: 8px; background: #f6f9fc; font-size: 12px; }
+.trend-day > b { width: 100%; font-size: 13px; }
+.trend-day span { display: inline-flex; align-items: center; gap: 6px; color: var(--slate); }
+.trend-day span b { color: var(--ink); }
+.trend-day i { width: 10px; height: 10px; border-radius: 3px; background: var(--c); }
+.trend-hint { margin: 4px 0 0; font-size: 12px; }
+
+/* Daily score: keep the period under the headline figure */
+.score-trend .trend-value { text-align: right; white-space: nowrap; }
+.score-trend .trend-value small { display: block; }
+/* The bar chart has period controls and a day panel: let its row grow instead of scrolling inside a fixed height. */
+.dashboard .dash-top { height: auto; align-items: start; }
+.dashboard .dash-top > .panel { overflow-y: visible; }
