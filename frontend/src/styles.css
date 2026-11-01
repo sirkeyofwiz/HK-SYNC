@@ -1326,3 +1326,16 @@ select.hk-select:invalid { color: var(--slate); }
 /* The bar chart has period controls and a day panel: let its row grow instead of scrolling inside a fixed height. */
 .dashboard .dash-top { height: auto; align-items: start; }
 .dashboard .dash-top > .panel { overflow-y: visible; }
+
+/* Reports and Tasks: look back by period */
+.filters { grid-template-columns: 1.7fr 1fr minmax(170px, auto); }
+.period-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.period-picker select { width: auto; min-width: 150px; flex: 1; }
+.period-picker input { width: auto; flex: 1; min-width: 130px; }
+.period-picker span { font-size: 12px; color: var(--slate); }
+.report-count { margin: -8px 0 12px; font-size: 12px; }
+.task-period { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 0 0 16px; }
+.task-period p { margin: 0; font-size: 13px; }
+.task-overdue { border-color: #efc4c2; background: #fffafa; }
+.overdue-tag { margin-left: 6px; font-size: 10px; font-weight: 800; padding: 3px 8px; border-radius: 20px; background: #fbe9e8; color: var(--red); text-transform: uppercase; letter-spacing: .4px; }
+@media (max-width: 760px) { .filters .period-picker { grid-column: 1 / -1; } }
