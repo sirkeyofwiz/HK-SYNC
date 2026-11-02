@@ -1441,3 +1441,7 @@ select.hk-select:invalid { color: var(--slate); }
   .care-history-table .table-row > span:nth-child(4).muted { display: none; }
   .care-history-table .table-row > span:nth-child(6) { grid-row: 1; grid-column: 2; }
 }
+
+/* Overview: supervisor performance */
+.sup-performance .not-inspected { margin: 12px 0 0; font-size: 13px; }
+.sup-performance .not-inspected .text { font-size: 13px; padding: 0; }
