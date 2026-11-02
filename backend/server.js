@@ -12,6 +12,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import webpush from 'web-push';
 import { registerStore } from './store.js';
 import { registerSupport } from './support.js';
+import { registerNotes } from './notes.js';
 import { backupConfigured, runBackup, listSnapshots, databaseSnapshot, restoreIfRequested, describeError, DAILY_KEEP, MONTHLY_KEEP } from './backup.js';
 
 dotenv.config();
@@ -1059,7 +1060,8 @@ app.get('/api/reports', authMiddleware, (req, res) => {
       data: withoutPhotos(report.data),
       submitter: sanitizeUser(state.users.find((user) => user.id === report.submittedBy) || {}),
       ...reportSummary(report),
-      discussion: discussions.get(`report:${report.id}`) || null
+      discussion: discussions.get(`report:${report.id}`) || null,
+      noteCount: notes.count('report', report.id)
     }))
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   return res.json({ reports });
@@ -1070,7 +1072,7 @@ app.get('/api/reports/:id', authMiddleware, (req, res) => {
   const viewer = currentUser(req);
   const report = state.reports.find((entry) => entry.id === req.params.id && !entry.voided);
   if (!canSeeReport(viewer, report)) return res.status(404).json({ message: 'Report not found.' });
-  return res.json({ report: { ...report, data: withPhotos(report.data), submitter: sanitizeUser(state.users.find((user) => user.id === report.submittedBy) || {}), ...reportSummary(report), threshold: FLAG_THRESHOLDS[report.type] ?? 6, discussion: discussionIndex(req.user.id).get(`report:${report.id}`) || null, canManage: isManagerRole(viewer), canDelete: canDeleteReport(viewer, report), canEdit: canEditReport(viewer, report), editedByName: report.editedBy ? userName(report.editedBy) : null } });
+  return res.json({ report: { ...report, data: withPhotos(report.data), submitter: sanitizeUser(state.users.find((user) => user.id === report.submittedBy) || {}), ...reportSummary(report), threshold: FLAG_THRESHOLDS[report.type] ?? 6, discussion: discussionIndex(req.user.id).get(`report:${report.id}`) || null, canManage: isManagerRole(viewer), canDelete: canDeleteReport(viewer, report), canEdit: canEditReport(viewer, report), editedByName: report.editedBy ? userName(report.editedBy) : null, noteCount: notes.count('report', report.id) } });
 });
 
 // The person a Shift Handover is handed to. Newer apps send their account id; older ones only a typed name,
@@ -1215,6 +1217,20 @@ const currentRoster = () => state.goals.find((entry) => entry.id === 'current').
 // Names only, for the "HK name" suggestions on report forms (supervisors fill those but can't open Goals).
 // Support plan on profiles: what managers did to help someone who needs attention, and how it turned out. See support.js.
 const support = registerSupport(app, { database, authMiddleware, requireManager, userName: (id) => userName(id), today: () => dateInAppZone(0) });
+
+// Notes for the manager on a report or task, written by whoever can open it. See notes.js.
+const notes = registerNotes(app, {
+  database,
+  authMiddleware,
+  who: (req) => currentUser(req),
+  findItem: (kind, id) => (kind === 'report' ? state.reports : state.tasks).find((item) => item.id === id),
+  canSee: (user, kind, item) => (kind === 'report' ? canSeeReport(user, item) : canSeeTask(user, item)),
+  describe: (kind, item) => (kind === 'report' ? `${REPORT_LABELS[item.type] || 'Report'} · ${item.date}` : `Task: ${item.title}`),
+  managers: () => state.users.filter((user) => isManagerRole(user) && user.active !== false),
+  notify: (userId, notification) => notify(userId, notification),
+  userName: (id) => userName(id),
+  isManagerRole: (user) => isManagerRole(user)
+});
 
 // Housekeeping store (items, day sheets, occupancy, budgets, consumption reports): see store.js. Hidden until
 // STORE_ENABLED=true is set (Railway variable on the API): its data is kept, but the app shows nothing of it.
@@ -1499,7 +1515,7 @@ app.get('/api/tasks', authMiddleware, (req, res) => {
   const discussions = discussionIndex(req.user.id);
   const viewer = currentUser(req);
   const tasks = state.tasks.filter((task) => canUpdateTask(viewer, task))
-    .map((task) => ({ ...task, discussion: discussions.get(`task:${task.id}`) || null }));
+    .map((task) => ({ ...task, discussion: discussions.get(`task:${task.id}`) || null, noteCount: notes.count('task', task.id) }));
   return res.json({ tasks });
 });
 
@@ -1508,7 +1524,7 @@ app.get('/api/tasks/:id', authMiddleware, (req, res) => {
   const task = state.tasks.find((entry) => entry.id === req.params.id);
   if (!canSeeTask(viewer, task)) return res.status(404).json({ message: 'Task not found.' });
   const nameOf = (id) => state.users.find((user) => user.id === id)?.name || null;
-  return res.json({ task: { ...task, assigneeName: nameOf(task.assignedTo), assignedByName: nameOf(task.assignedBy), discussion: discussionIndex(req.user.id).get(`task:${task.id}`) || null, canUpdate: canUpdateTask(viewer, task), canDelete: isManagerRole(viewer) } });
+  return res.json({ task: { ...task, assigneeName: nameOf(task.assignedTo), assignedByName: nameOf(task.assignedBy), discussion: discussionIndex(req.user.id).get(`task:${task.id}`) || null, canUpdate: canUpdateTask(viewer, task), canDelete: isManagerRole(viewer), noteCount: notes.count('task', task.id) } });
 });
 
 // The choices the app's task form offers; anything else would break sorting and the priority badges.

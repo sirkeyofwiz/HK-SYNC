@@ -1360,3 +1360,13 @@ select.hk-select:invalid { color: var(--slate); }
 }
 /* The four-target table needs the full width under the supervisor points. */
 .goals-points .hk-targets { grid-column: 1 / -1; }
+
+
+/* Notes for the manager on reports and tasks */
+.note-button.has-notes { background: #fdf8ee; border-color: #f0dfbf; }
+.note-list { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 8px; max-height: 260px; overflow-y: auto; }
+.note-list li { padding: 10px 12px; border-radius: 8px; background: #fdf8ee; border: 1px solid #f0dfbf; }
+.note-list p { margin: 0 0 4px; white-space: pre-wrap; }
+.note-list small { color: var(--slate); font-size: 12px; display: flex; gap: 10px; align-items: center; }
+.note-list small .text { font-size: 12px; }
+.notes-panel .note-list { max-height: none; }
