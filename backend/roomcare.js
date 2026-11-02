@@ -1,6 +1,6 @@
 // Room care: three logs supervisors keep, from the hotel's Excel sheets.
 // - Mattress rotation: each room's mattress turned (and by which housekeeper), every 4 months.
-// - Upholstery: armchair, luggage rack, carpet, sofa and pouf cleaned in a room, every month.
+// - Upholstery: armchair, luggage rack, carpet, sofa, pouf, decoration pillow and bed runner cleaned in a room, every month.
 // - Water drainage: in each block's empty rooms, all taps and the shower run for 5 minutes, every month; a plumbing
 //   problem is reported as an issue (it flags the report for the managers, like any other problem).
 // Each is an ordinary report (type mattress_rotation / upholstery / drainage) with one line per room or block. The
@@ -16,7 +16,7 @@ export const BLOCKS = [
   ...[21, 22, 23, 24, 25].map((block) => ({ name: `Block ${block}`, rooms: range(block, 10) }))
 ];
 export const ROOMS = BLOCKS.flatMap((block) => block.rooms);
-export const UPHOLSTERY_ITEMS = ['Armchair', 'Luggage rack', 'Carpet', 'Sofa', 'Pouf'];
+export const UPHOLSTERY_ITEMS = ['Armchair', 'Luggage rack', 'Carpet', 'Sofa', 'Pouf', 'Decoration pillow', 'Bed runner'];
 export const DRAINAGE_STATUSES = ['Done', 'Issue'];
 // How long until it is due again, in months.
 export const ROOM_CARE = {
