@@ -473,7 +473,7 @@ function buildProfiles(period) {
       if (report.type === 'guest_interaction') {
         person.checks.push({ date: report.date, scores: Object.fromEntries(INTERACTION_ITEMS.map((item) => [item, itemScore(line.entry, item)])), average: lineAverage, note: line.entry.remarks || '' });
       } else {
-        person.rooms.push({ reportId: report.id, date: report.date, type: TYPE_LABELS[report.type], place: line.place, average: lineAverage, remarks: line.entry.remarks || '' });
+        person.rooms.push({ reportId: report.id, date: report.date, kind: report.type, type: TYPE_LABELS[report.type], place: line.place, average: lineAverage, remarks: line.entry.remarks || '' });
       }
       people.set(key, person);
     }
@@ -495,7 +495,7 @@ function profileFor(name, { people, team }) {
   // The same rooms per inspection (one report = one inspection): the latest 30, oldest first, for the trend chart.
   const inspections = new Map();
   for (const room of person.rooms) {
-    const visit = inspections.get(room.reportId) || { reportId: room.reportId, date: room.date, type: room.type, places: [], values: [] };
+    const visit = inspections.get(room.reportId) || { reportId: room.reportId, date: room.date, kind: room.kind, type: room.type, places: [], values: [] };
     visit.places.push(room.place);
     visit.values.push(room.average);
     inspections.set(room.reportId, visit);

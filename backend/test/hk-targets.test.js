@@ -51,6 +51,7 @@ test('the profile trend also gives the average per inspection, one per report, o
   assert.equal(visit.rooms, 2);
   assert.equal(visit.average, 7);
   assert.equal(visit.type, 'Quality Checklist');
+  assert.equal(visit.kind, 'quality');
   assert.deepEqual(visit.places, ['Room 201', 'Room 202']);
   // Each report that rated her is one inspection (guest interaction checks are separate).
   assert.equal(profile.byInspection.length, 4);

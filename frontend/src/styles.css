@@ -1463,3 +1463,9 @@ button.chart-bar { border: 0; padding: 0; cursor: pointer; }
 .chart.by-inspection .chart-column { min-width: 46px; }
 .chart.by-inspection .chart-bar b { top: 4px; color: #fff; font-weight: 600; }
 .chart.by-inspection .chart-column small { white-space: nowrap; }
+
+/* Per inspection bars and key: the report type colours of the Overview's daily score chart */
+.hk-trend { --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100; --series-5: #e87ba4; }
+.hk-trend .series-1 { --c: var(--series-1); } .hk-trend .series-2 { --c: var(--series-2); } .hk-trend .series-3 { --c: var(--series-3); } .hk-trend .series-4 { --c: var(--series-4); } .hk-trend .series-5 { --c: var(--series-5); }
+.chart.by-inspection .chart-bar[class*="series-"] { background: var(--c); }
+.hk-trend .trend-legend { margin: 8px 0 10px; }
