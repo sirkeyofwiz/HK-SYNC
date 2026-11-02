@@ -27,16 +27,17 @@ export function PerformancePanel({ performance, openProfile, setPage }) {
     </div></section>;
 }
 // Overview "Supervisor performance": the same two lists for supervisors, from the Inspection Rate Program rooms that
-// managers inspected in the last 30 days (out of 50 per room). Tapping a name opens the supervisor's profile.
+// managers inspected in the last 30 days (out of 50 per room), split at the pass mark: 30/50 and above is doing well,
+// below needs support. Tapping a name opens the supervisor's profile.
 export function SupervisorPerformanceRow({ row, tone, openSupervisor }) {
   return <button type="button" className={`perf-row ${tone}`} onClick={() => openSupervisor(row.id, row.name)}><span className="perf-name"><b>{row.name}</b><small>{plural(row.rooms, 'room')} inspected{row.failed ? ` · ${row.failed} failed` : ''}{tone === 'poor' && row.weakest ? ` · weakest: ${row.weakest.label} ${row.weakest.average}` : ''}</small></span><span className="perf-bar" aria-hidden="true"><i style={{ width: `${Math.min(100, row.average * 10)}%` }} /></span><strong>{row.roomAverage}<small>/50</small></strong></button>;
 }
 export function SupervisorPerformancePanel({ performance, openSupervisor, setPage }) {
-  const { days, goodAt, supportBelow } = performance;
-  const { top, support, inspected, total, notInspected } = performance.supervisors;
-  const good = goodAt * 5;
-  const low = supportBelow * 5;
-  return <section className="panel performance-panel sup-performance"><div className="panel-title"><div><p className="kicker">SUPERVISOR PERFORMANCE · LAST {days} DAYS</p><h3>Who is doing well, who needs support</h3><small className="muted">Average Inspection Rate Program room score out of 50 · {inspected} of {plural(total, 'supervisor')} inspected · a room under {IRP_PASS}/50 fails</small></div><button className="text" onClick={() => setPage('people')}>All profiles →</button></div>
+  const { days } = performance;
+  const { top, support, inspected, total, notInspected, passAt = IRP_PASS } = performance.supervisors;
+  const good = passAt;
+  const low = passAt;
+  return <section className="panel performance-panel sup-performance"><div className="panel-title"><div><p className="kicker">SUPERVISOR PERFORMANCE · LAST {days} DAYS</p><h3>Who is doing well, who needs support</h3><small className="muted">Average Inspection Rate Program room score out of 50 · {inspected} of {plural(total, 'supervisor')} inspected · {passAt}/50 is the pass mark</small></div><button className="text" onClick={() => setPage('people')}>All profiles →</button></div>
     <div className="perf-columns">
       <div className="perf-list"><h4 className="good">Performing well <small>{good}/50 and above</small></h4>{top.map((row) => <SupervisorPerformanceRow key={row.id} row={row} tone="good" openSupervisor={openSupervisor} />)}{!top.length && <Empty text={`No supervisor at ${good}/50 or above in the last ${days} days yet.`} />}</div>
       <div className="perf-list"><h4 className="poor">Need support <small>below {low}/50</small></h4>{support.map((row) => <SupervisorPerformanceRow key={row.id} row={row} tone="poor" openSupervisor={openSupervisor} />)}{!support.length && <Empty text={`No supervisor below ${low}/50. Well done, team.`} />}</div>

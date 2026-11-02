@@ -1423,8 +1423,9 @@ app.get('/api/hk-performance', authMiddleware, requireManager, (req, res) => {
 });
 
 // Overview "Supervisor performance": the same, for supervisors, from the Inspection Rate Program (managers inspecting a
-// supervisor's rooms) over the last 30 days. A room is out of 50 (five items of 10); the bands are the housekeepers'
-// (an average of 8 = 40/50 is doing well, under 7 = 35/50 needs support). A room under the pass mark (30/50) has failed.
+// supervisor's rooms) over the last 30 days. A room is out of 50 (five items of 10). The line is the IRP pass mark
+// (30/50, an average of 6): an average of 30/50 or more is doing well, under 30/50 needs support, so every inspected
+// supervisor is on one list. A room under the pass mark has failed.
 // Supervisors with no inspected room in the period are listed, so a manager can go and inspect them.
 function supervisorPerformance(since) {
   const supervisors = activeSupervisors();
@@ -1456,8 +1457,9 @@ function supervisorPerformance(since) {
   return {
     inspected: ranked.length,
     total: supervisors.length,
-    top: ranked.filter((row) => row.average >= STRENGTH_AT).sort((a, b) => b.average - a.average || b.rooms - a.rooms).slice(0, 5),
-    support: ranked.filter((row) => row.average < WEAKNESS_BELOW).sort((a, b) => a.average - b.average || b.rooms - a.rooms).slice(0, 5),
+    passAt: FLAG_THRESHOLDS.inspection_rate * 5,
+    top: ranked.filter((row) => row.average >= FLAG_THRESHOLDS.inspection_rate).sort((a, b) => b.average - a.average || b.rooms - a.rooms),
+    support: ranked.filter((row) => row.average < FLAG_THRESHOLDS.inspection_rate).sort((a, b) => a.average - b.average || b.rooms - a.rooms),
     notInspected: supervisors.filter((user) => !people.has(user.id)).map((user) => ({ id: user.id, name: user.name })).sort((a, b) => a.name.localeCompare(b.name))
   };
 }
