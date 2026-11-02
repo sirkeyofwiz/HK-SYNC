@@ -1414,3 +1414,30 @@ select.hk-select:invalid { color: var(--slate); }
 @media (max-width: 640px) { .care-block { grid-template-columns: 1fr; gap: 4px; } .care-block > b { padding-top: 0; } }
 .entry-card .care-items label.care-item { flex-direction: row; align-items: center; gap: 6px; font-size: 14px; font-weight: 500; color: var(--ink); }
 .drainage-blocks { align-items: start; }
+
+/* Room care history */
+.care-count { margin: 0 0 8px; }
+.care-view { margin: 0; }
+.month-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 12px 0 10px; }
+.month-nav b { min-width: 130px; text-align: center; }
+.month-nav .secondary { padding: 6px 12px; }
+.drainage-sheet .name-link { text-align: left; }
+.care-history-table .table-head, .care-history-table .table-row { grid-template-columns: 1fr 0.9fr 1.6fr 1.6fr 1fr 0.6fr; }
+.care-history { max-width: 560px; }
+.care-timeline { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; max-height: 60vh; overflow-y: auto; }
+.care-timeline li { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: 8px; background: #f3fbf6; border: 1px solid #cfe9db; }
+.care-timeline li.problem { background: #fdf3f2; border-color: #f1b3ad; }
+.care-timeline li > div { display: grid; gap: 2px; }
+.care-timeline i { font-size: 13px; }
+.care-timeline small { color: var(--slate); font-size: 12px; }
+.care-timeline .text { white-space: nowrap; font-size: 13px; }
+@media (max-width: 640px) {
+  .care-history-list .filters { grid-template-columns: 1fr; }
+  .care-history-table .table-head { display: none; }
+  .care-history-table .table-row { grid-template-columns: 1fr auto; gap: 2px 10px; }
+  .care-history-table .table-row > span:nth-child(2) { grid-row: 1; grid-column: 1; font-weight: 600; }
+  .care-history-table .table-row > span:nth-child(1) { grid-row: 2; grid-column: 1; font-size: 13px; color: var(--slate); }
+  .care-history-table .table-row > span:nth-child(3), .care-history-table .table-row > span:nth-child(4), .care-history-table .table-row > span:nth-child(5) { grid-column: 1; font-size: 13px; }
+  .care-history-table .table-row > span:nth-child(4).muted { display: none; }
+  .care-history-table .table-row > span:nth-child(6) { grid-row: 1; grid-column: 2; }
+}

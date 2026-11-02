@@ -74,3 +74,26 @@ test('supervisors can see the tracker; drivers cannot file or see room care', as
   assert.equal((await server.call('GET', '/api/room-care', { token: driver.token })).status, 403);
   assert.equal((await submit('drainage', [{ block: 'Block 1', status: 'Done' }], hotelDate(0), driver.token)).status, 403);
 });
+
+test('history: every record of a room, newest first, and earlier months of the drainage sheet', async () => {
+  await submit('mattress_rotation', [{ room: '108', hkName: 'Sarah Mussa', remarks: 'Mattress stained' }], hotelDate(-200));
+  await submit('mattress_rotation', [{ room: '108', hkName: 'Sarah Mussa' }], hotelDate(-60));
+  const history = (await server.call('GET', '/api/room-care/history?type=mattress_rotation&key=108', { token: manager })).body.rows;
+  assert.deepEqual(history.map((row) => row.date), [hotelDate(-60), hotelDate(-200)]);
+  assert.equal(history[1].remarks, 'Mattress stained');
+  // All records of a log, for the history list.
+  const all = (await server.call('GET', '/api/room-care/history?type=mattress_rotation', { token: supervisor.token })).body.rows;
+  assert.ok(all.length >= 5 && all[0].date >= all[all.length - 1].date);
+  assert.equal((await server.call('GET', '/api/room-care/history?type=nothing', { token: manager })).status, 400);
+  assert.equal((await server.call('GET', '/api/room-care/history?type=drainage', { token: driver.token })).status, 403);
+  // Drainage in an earlier month shows on that month's sheet only.
+  const old = hotelDate(-70);
+  await submit('drainage', [{ block: 'Block 9', status: 'Done' }], old);
+  const then = (await server.call('GET', `/api/room-care?month=${old.slice(0, 7)}`, { token: manager })).body.tracker.drainage;
+  assert.equal(then.month, old.slice(0, 7));
+  assert.equal(then.weeks['Block 9'][0].date, old);
+  const now = (await tracker()).tracker.drainage;
+  assert.equal(now.weeks['Block 9'].length, 0);
+  // A future month falls back to this month.
+  assert.equal((await server.call('GET', '/api/room-care?month=2999-01', { token: manager })).body.tracker.drainage.month, now.month);
+});

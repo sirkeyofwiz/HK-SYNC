@@ -91,42 +91,51 @@ export function registerRoomCare(app, { authMiddleware, who, reports, userName, 
   // Supervisors keep these logs; managers read them.
   const canSee = (user) => ['supervisor', 'manager', 'assistant_manager'].includes(user?.role);
 
+  // Every room care line ever recorded for a type, oldest first (on the same day, the later report last).
+  const records = (type) => {
+    const rule = ROOM_CARE[type];
+    return reports().filter((report) => report.type === type && !report.voided)
+      .sort((a, b) => a.date.localeCompare(b.date) || String(a.createdAt).localeCompare(String(b.createdAt)))
+      .flatMap((report) => (Array.isArray(report.data?.entries) ? report.data.entries : [])
+        .map((line) => ({ key: rule.by === 'room' ? line.room : line.block, date: report.date, reportId: report.id, by: userName(report.submittedBy), hkName: line.hkName || null, items: line.items || null, status: line.status || null, remarks: line.remarks || '' }))
+        .filter((row) => row.key));
+  };
+
+  // The tracker: per room or block, the latest record and whether it is due. `month` (YYYY-MM, default this month)
+  // picks the month shown on the drainage sheet, so managers can look back at earlier months.
   app.get('/api/room-care', authMiddleware, (req, res) => {
     if (!canSee(who(req))) return res.status(403).json({ message: 'Room care is for supervisors and managers.' });
     const now = today();
+    const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(req.query.month || '')) && req.query.month <= now.slice(0, 7) ? req.query.month : now.slice(0, 7);
     const tracker = {};
     for (const [type, rule] of Object.entries(ROOM_CARE)) {
-      // The latest record per room or block (newest report date wins; on the same day, the later report).
-      const latest = new Map();
-      const done = reports().filter((report) => report.type === type && !report.voided)
-        .sort((a, b) => a.date.localeCompare(b.date) || String(a.createdAt).localeCompare(String(b.createdAt)));
-      for (const report of done) {
-        for (const line of Array.isArray(report.data?.entries) ? report.data.entries : []) {
-          const key = rule.by === 'room' ? line.room : line.block;
-          if (!key) continue;
-          latest.set(key, { date: report.date, reportId: report.id, by: userName(report.submittedBy), hkName: line.hkName || null, items: line.items || null, status: line.status || null, remarks: line.remarks || '' });
-        }
-      }
+      const done = records(type);
+      const latest = new Map(done.map(({ key, ...last }) => [key, last]));
       const keys = rule.by === 'room' ? ROOMS : BLOCKS.map((block) => block.name);
       const rows = keys.map((key) => {
         const last = latest.get(key) || null;
         const dueOn = last ? addMonths(last.date, rule.months) : null;
         return { key, last, dueOn, due: !last || dueOn <= now };
       });
-      tracker[type] = { label: rule.label, months: rule.months, by: rule.by, rows, dueCount: rows.filter((row) => row.due).length, neverCount: rows.filter((row) => !row.last).length };
-      // Drainage: what was done in each week of this month, for the monthly sheet.
+      tracker[type] = { label: rule.label, months: rule.months, by: rule.by, rows, dueCount: rows.filter((row) => row.due).length, neverCount: rows.filter((row) => !row.last).length, first: done[0]?.date || null };
+      // Drainage: what was done in each week of the month, for the monthly sheet.
       if (type === 'drainage') {
-        const month = now.slice(0, 7);
         tracker[type].month = month;
         tracker[type].weeks = Object.fromEntries(keys.map((key) => [key, []]));
-        for (const report of done.filter((entry) => entry.date.startsWith(month))) {
-          for (const line of report.data.entries || []) {
-            if (!tracker[type].weeks[line.block]) continue;
-            tracker[type].weeks[line.block].push({ week: Math.min(4, Math.ceil(Number(report.date.slice(8)) / 7)), date: report.date, status: line.status, remarks: line.remarks || '', reportId: report.id });
-          }
+        for (const row of done.filter((entry) => entry.date.startsWith(month))) {
+          tracker[type].weeks[row.key]?.push({ week: Math.min(4, Math.ceil(Number(row.date.slice(8)) / 7)), date: row.date, status: row.status, remarks: row.remarks, reportId: row.reportId });
         }
       }
     }
     res.json({ today: now, blocks: BLOCKS, tracker });
+  });
+
+  // History: every record of one log, newest first, optionally for one room or block only.
+  app.get('/api/room-care/history', authMiddleware, (req, res) => {
+    if (!canSee(who(req))) return res.status(403).json({ message: 'Room care is for supervisors and managers.' });
+    const { type, key } = req.query;
+    if (!ROOM_CARE[type]) return res.status(400).json({ message: 'Choose mattress rotation, upholstery or water drainage.' });
+    const rows = records(type).filter((row) => !key || row.key === key).reverse();
+    res.json({ type, label: ROOM_CARE[type].label, by: ROOM_CARE[type].by, rows });
   });
 }
