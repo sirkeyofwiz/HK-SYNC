@@ -13,6 +13,7 @@ import webpush from 'web-push';
 import { registerStore } from './store.js';
 import { registerSupport } from './support.js';
 import { registerNotes } from './notes.js';
+import { prepareRoomCare, registerRoomCare, ROOM_CARE } from './roomcare.js';
 import { backupConfigured, runBackup, listSnapshots, databaseSnapshot, restoreIfRequested, describeError, DAILY_KEEP, MONTHLY_KEEP } from './backup.js';
 
 dotenv.config();
@@ -133,12 +134,12 @@ const JWT_SECRET = process.env.JWT_SECRET || 'local-development-secret';
 const APP_TIMEZONE = process.env.APP_TIMEZONE || 'Africa/Dar_es_Salaam';
 const onlineUsers = new Map(); // userId -> Set of socket ids
 const roleReportTypes = {
-  supervisor: ['neglected', 'quality', 'trolley_pantry', 'handover', 'guest_interaction'],
+  supervisor: ['neglected', 'quality', 'trolley_pantry', 'handover', 'guest_interaction', 'mattress_rotation', 'upholstery', 'drainage'],
   storekeeper: ['tools'],
   store_supervisor: ['tools'],
   driver: ['vehicle'],
-  manager: ['neglected', 'quality', 'trolley_pantry', 'handover', 'vehicle', 'tools', 'inspection_rate', 'guest_interaction'],
-  assistant_manager: ['neglected', 'quality', 'trolley_pantry', 'handover', 'vehicle', 'tools', 'inspection_rate', 'guest_interaction']
+  manager: ['neglected', 'quality', 'trolley_pantry', 'handover', 'vehicle', 'tools', 'inspection_rate', 'guest_interaction', 'mattress_rotation', 'upholstery', 'drainage'],
+  assistant_manager: ['neglected', 'quality', 'trolley_pantry', 'handover', 'vehicle', 'tools', 'inspection_rate', 'guest_interaction', 'mattress_rotation', 'upholstery', 'drainage']
 };
 
 function readState() {
@@ -590,7 +591,7 @@ function reportSummary(report) {
   const flaggedEntries = entries.filter((entry) => {
     const values = scoreValues(entry);
     const average = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 10;
-    return average < threshold || entry.status === 'Broken' || (report.type !== 'guest_interaction' && Boolean(entry.remarks));
+    return average < threshold || entry.status === 'Broken' || entry.status === 'Issue' || (report.type !== 'guest_interaction' && Boolean(entry.remarks));
   });
   return {
     itemCount: entries.length || (report.data?.items ? report.data.items.length : 0),
@@ -1094,6 +1095,9 @@ function handoverReceiver(data, submitterId) {
 // Type-specific checks and tidying for a new or edited report. Returns a message for the person, or null when it is fine.
 // `submitter` is whoever filed the report (an edit by a manager keeps the original submitter).
 function prepareReportData(type, data, submitter) {
+  // Mattress rotation, upholstery and water drainage: see roomcare.js. A housekeeper's name takes the roster's spelling.
+  const careProblem = prepareRoomCare(type, data, (name) => currentRoster().map((row) => row.name).find((rosterName) => nameKey(rosterName) === nameKey(name)) || null);
+  if (careProblem) return careProblem;
   if (type === 'guest_interaction' && (!Array.isArray(data.entries) || !data.entries.length || data.entries.some((entry) => !String(entry?.hkName || '').trim()))) {
     return 'Add the housekeeper being assessed.';
   }
@@ -1231,6 +1235,9 @@ const notes = registerNotes(app, {
   userName: (id) => userName(id),
   isManagerRole: (user) => isManagerRole(user)
 });
+
+// Room care trackers (mattress rotation, upholstery, water drainage): which rooms and blocks are due. See roomcare.js.
+registerRoomCare(app, { authMiddleware, who: (req) => currentUser(req), reports: () => state.reports, userName: (id) => userName(id), today: () => dateInAppZone(0) });
 
 // Housekeeping store (items, day sheets, occupancy, budgets, consumption reports): see store.js. Hidden until
 // STORE_ENABLED=true is set (Railway variable on the API): its data is kept, but the app shows nothing of it.
@@ -1714,6 +1721,7 @@ function lineLabel(report, list, entry, index) {
   if (list === 'trolleys') return entry.block ? `Trolley · Block ${entry.block}` : `Trolley ${index + 1}`;
   if (list === 'pantries') return entry.block ? `Pantry · Block ${entry.block}` : `Pantry ${index + 1}`;
   if (report.type === 'tools') return entry.tool || `Tool ${index + 1}`;
+  if (report.type === 'drainage') return entry.block || `Block ${index + 1}`;
   if (report.type === 'guest_interaction') return entry.hkName || `Housekeeper ${index + 1}`;
   return entry.room ? `Room ${entry.room}` : `Line ${index + 1}`;
 }
@@ -1780,7 +1788,7 @@ const DEFAULT_NOTIFY = {
   preview: true,
   sound: true
 };
-const REPORT_LABELS = { neglected: 'Neglected Area', quality: 'Quality Checklist', trolley_pantry: 'Trolley / Pantry', handover: 'Shift Handover', vehicle: 'Vehicle Checklist', tools: 'Tools Control', inspection_rate: 'Inspection Rate Program', guest_interaction: 'Guest Interaction Check' };
+const REPORT_LABELS = { mattress_rotation: ROOM_CARE.mattress_rotation.label, upholstery: ROOM_CARE.upholstery.label, drainage: ROOM_CARE.drainage.label, neglected: 'Neglected Area', quality: 'Quality Checklist', trolley_pantry: 'Trolley / Pantry', handover: 'Shift Handover', vehicle: 'Vehicle Checklist', tools: 'Tools Control', inspection_rate: 'Inspection Rate Program', guest_interaction: 'Guest Interaction Check' };
 const NOTIFICATION_DAYS = 60;
 
 function notifySettings(user) {
