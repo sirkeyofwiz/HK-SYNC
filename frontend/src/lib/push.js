@@ -26,6 +26,6 @@ export const nativePushToken = async () => {
     });
   } finally { handles.forEach((handle) => handle.then((value) => value.remove()).catch(() => {})); }
 };
-export const NOTIFY_ICONS = { message: '💬', question: '❓', task: '✓', report_signed: '✍️', report_flagged: '⚠️', inspected: '📋', handover: '🔁', reaction: '👍', note: '📝' };
+export const NOTIFY_ICONS = { message: '💬', question: '❓', task: '✓', report_signed: '✍️', report_flagged: '⚠️', inspected: '📋', handover: '🔁', reaction: '👍', note: '📝', task_reminder: '⏰' };
 // A soft two-note chime made in the browser (no sound file to download).
 export const playChime = () => { try { const context = new (window.AudioContext || window.webkitAudioContext)(); [[880, 0], [1320, 0.12]].forEach(([frequency, start]) => { const oscillator = context.createOscillator(); const gain = context.createGain(); oscillator.frequency.value = frequency; oscillator.type = 'sine'; gain.gain.setValueAtTime(0.0001, context.currentTime + start); gain.gain.exponentialRampToValueAtTime(0.12, context.currentTime + start + 0.02); gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + start + 0.35); oscillator.connect(gain).connect(context.destination); oscillator.start(context.currentTime + start); oscillator.stop(context.currentTime + start + 0.4); }); setTimeout(() => context.close(), 1000); } catch { /* sound is optional */ } };

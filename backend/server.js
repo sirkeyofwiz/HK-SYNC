@@ -1568,6 +1568,7 @@ app.patch('/api/tasks/:id/status', authMiddleware, (req, res) => {
   task.completedAt = status === 'completed' ? task.updatedAt : null;
   task.updatedBy = req.user.id;
   saveRow('tasks', task);
+  if (status === 'completed') clearTaskReminders(task);
   if (previous !== status) {
     const actor = userName(req.user.id);
     const link = { page: 'task', id: task.id };
@@ -1587,6 +1588,43 @@ app.patch('/api/tasks/:id/status', authMiddleware, (req, res) => {
   return res.json({ task });
 });
 
+// ---------- Task reminders ----------
+// An open task (pending or in progress) reminds the person it is assigned to every hour until it is completed. Each
+// reminder replaces the last one on the phone (same alert tag), and only the newest stays unread in the bell. Quiet
+// hours are kept (the reminder waits for the morning), except for urgent tasks. Once a task is past its due date, the
+// manager who assigned it is told, once.
+const TASK_REMINDER_MS = (Number(process.env.TASK_REMINDER_MINUTES) || 60) * 60 * 1000;
+const TASK_REMINDER_CHECK_MS = Number(process.env.TASK_REMINDER_CHECK_MS) || 5 * 60 * 1000;
+const isReminderFor = (task) => (notification) => notification.type === 'task_reminder' && notification.link?.id === task.id;
+function clearTaskReminders(task) {
+  if (task.assignedTo) markNotificationsRead(task.assignedTo, isReminderFor(task));
+}
+function sendTaskReminders() {
+  const now = Date.now();
+  const today = dateInAppZone(0);
+  for (const task of state.tasks) {
+    if (task.voided || task.status === 'completed' || !task.assignedTo) continue;
+    const assignee = state.users.find((user) => user.id === task.assignedTo && user.active !== false);
+    if (!assignee) continue;
+    const overdue = Boolean(task.dueDate && task.dueDate < today);
+    const link = { page: 'task', id: task.id };
+    if (overdue && !task.overdueAlertedAt) {
+      task.overdueAlertedAt = new Date(now).toISOString();
+      saveRow('tasks', task);
+      // Tasks already overdue for over a week when reminders began are long known (the board marks them Overdue).
+      if (task.dueDate >= dateInAppZone(-7) && task.assignedBy !== task.assignedTo) notify(task.assignedBy, { type: 'task', title: 'Task overdue', body: `${task.title} · ${assignee.name} · was due ${task.dueDate}`, link });
+    }
+    if (now - (Date.parse(task.remindedAt || task.createdAt) || 0) < TASK_REMINDER_MS) continue;
+    const urgent = task.priority === 'urgent';
+    if (!urgent && inQuietHours(notifySettings(assignee))) continue;
+    clearTaskReminders(task);
+    task.remindedAt = new Date(now).toISOString();
+    saveRow('tasks', task);
+    notify(assignee.id, { type: 'task_reminder', urgent, title: `Reminder: ${task.status === 'in_progress' ? 'task still in progress' : 'task not started yet'}`, body: `${task.title} · ${task.location}${overdue ? ` · overdue since ${task.dueDate}` : task.dueDate ? ` · due ${task.dueDate}` : ''}. Press Complete when it is done.`, link });
+  }
+}
+setInterval(sendTaskReminders, TASK_REMINDER_CHECK_MS).unref();
+
 // Managers can delete a task (staff only start or complete theirs). Like reports, it is hidden everywhere but kept
 // in the database and backups with who deleted it and when. The assignee is told so they stop working on it.
 app.delete('/api/tasks/:id', authMiddleware, requireManager, (req, res) => {
@@ -1597,6 +1635,7 @@ app.delete('/api/tasks/:id', authMiddleware, requireManager, (req, res) => {
   task.voidedBy = req.user.id;
   task.updatedAt = task.voidedAt;
   saveRow('tasks', task);
+  clearTaskReminders(task);
   if (task.assignedTo && task.status !== 'completed') notify(task.assignedTo, { type: 'task', fromUserId: req.user.id, title: 'Task cancelled', body: `${task.title} · by ${req.currentUser.name}` });
   return res.json({ deleted: true });
 });
@@ -1781,7 +1820,7 @@ function discussionIndex(userId) {
 // ---------- Notifications ----------
 // Every alert is stored (for the 🔔 list) and pushed to the person's devices unless they have the app open on screen,
 // it's their quiet hours (urgent tasks still come through), or they turned that kind of alert off.
-const NOTIFY_CATEGORY = { message: 'messages', question: 'questions', task: 'tasks', report_signed: 'reportSigned', report_flagged: 'reportFlagged', inspected: 'inspected', handover: 'handovers', reaction: 'reactions' };
+const NOTIFY_CATEGORY = { message: 'messages', question: 'questions', task: 'tasks', task_reminder: 'tasks', report_signed: 'reportSigned', report_flagged: 'reportFlagged', inspected: 'inspected', handover: 'handovers', reaction: 'reactions' };
 const DEFAULT_NOTIFY = {
   categories: { messages: true, questions: true, tasks: true, reportSigned: true, reportFlagged: true, inspected: true, handovers: true, reactions: false },
   quietHours: { enabled: true, start: '22:00', end: '06:00' },
