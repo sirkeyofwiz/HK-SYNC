@@ -1445,3 +1445,21 @@ select.hk-select:invalid { color: var(--slate); }
 /* Overview: supervisor performance */
 .sup-performance .not-inspected { margin: 12px 0 0; font-size: 13px; }
 .sup-performance .not-inspected .text { font-size: 13px; padding: 0; }
+
+/* Housekeeper profile: trend by month or per inspection */
+.hk-trend .trend-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.hk-trend .trend-by { margin: 0; }
+.chart.by-inspection .chart-area { overflow-x: auto; gap: 6px; }
+.chart.by-inspection .chart-column { min-width: 34px; }
+button.chart-bar { border: 0; padding: 0; cursor: pointer; }
+.chart-bar.good { background: linear-gradient(180deg, #4fbf88, var(--green)); }
+.chart-bar.ok { background: linear-gradient(180deg, #f2c25b, #d99a00); }
+.chart-bar.support { background: linear-gradient(180deg, #ee8a80, var(--red)); }
+.chart-bar.good b { color: var(--green); }
+.chart-bar.ok b { color: #b07d00; }
+.chart-bar.support b { color: var(--red); }
+.hk-trend .trend-note { margin: 8px 0 0; font-size: 12px; }
+.hk-trend, .hk-trend .chart { min-width: 0; }
+.chart.by-inspection .chart-column { min-width: 46px; }
+.chart.by-inspection .chart-bar b { top: 4px; color: #fff; font-weight: 600; }
+.chart.by-inspection .chart-column small { white-space: nowrap; }

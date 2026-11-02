@@ -492,6 +492,14 @@ function profileFor(name, { people, team }) {
     if (!months.has(month)) months.set(month, []);
     months.get(month).push(room.average);
   }
+  // The same rooms per inspection (one report = one inspection): the latest 30, oldest first, for the trend chart.
+  const inspections = new Map();
+  for (const room of person.rooms) {
+    const visit = inspections.get(room.reportId) || { reportId: room.reportId, date: room.date, type: room.type, places: [], values: [] };
+    visit.places.push(room.place);
+    visit.values.push(room.average);
+    inspections.set(room.reportId, visit);
+  }
   return {
     name,
     rooms: person.rooms.length,
@@ -501,6 +509,7 @@ function profileFor(name, { people, team }) {
     weaknesses: rated.filter((item) => item.average < WEAKNESS_BELOW).sort((a, b) => a.average - b.average || b.count - a.count).slice(0, 3),
     items,
     trend: [...months.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([month, values]) => ({ month, average: round1(average(values)), rooms: values.length })),
+    byInspection: [...inspections.values()].sort((a, b) => String(a.date).localeCompare(String(b.date))).slice(-30).map(({ values, places, ...visit }) => ({ ...visit, places: places.filter(Boolean).slice(0, 8), rooms: values.length, average: round1(average(values)) })),
     // Remarks have their own list now, so flagged rooms are the low-scoring ones.
     flagged: person.rooms.filter((room) => room.average < 6).reverse().slice(0, 10),
     remarks: [...person.remarks].reverse().slice(0, 300),

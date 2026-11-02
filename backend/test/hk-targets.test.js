@@ -42,3 +42,17 @@ test('the goals response and the profile give the four targets', async () => {
   assert.equal(profile.points.categories.guestInteraction.points, 9);
   assert.equal(profile.points.met, 0);
 });
+
+test('the profile trend also gives the average per inspection, one per report, oldest first', async () => {
+  // Two rooms on one Quality Checklist: 6 and 8 → this inspection averages 7.
+  const two = (await file('quality', { block: 'B2', entries: [{ room: '201', hkName: 'Sarah Mussa', scores: { Shower: '6' } }, { room: '202', hkName: 'Sarah Mussa', scores: { Shower: '8' } }] })).body.report;
+  const profile = (await server.call('GET', '/api/hk-profiles/Sarah%20Mussa', { token: manager })).body.profile;
+  const visit = profile.byInspection.find((row) => row.reportId === two.id);
+  assert.equal(visit.rooms, 2);
+  assert.equal(visit.average, 7);
+  assert.equal(visit.type, 'Quality Checklist');
+  assert.deepEqual(visit.places, ['Room 201', 'Room 202']);
+  // Each report that rated her is one inspection (guest interaction checks are separate).
+  assert.equal(profile.byInspection.length, 4);
+  assert.equal(profile.byInspection.at(-1).reportId, two.id);
+});
