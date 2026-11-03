@@ -2567,6 +2567,206 @@ app.get('/api/backups/download', authMiddleware, requireManager, requireOwnerMan
   return res.send(snapshot);
 });
 
+// ---------- Contract review ----------
+// End-of-year evidence for renewing housekeepers' and supervisors' contracts, from one financial year's inspections.
+// The app suggests a band; the manager records the decision and the reason. Only the manager can open it, unless they
+// share it with assistant managers (who can then read it, not decide); housekeepers and supervisors never see it.
+// The bands are the hotel's own rules and the manager can change them; these are the starting values.
+//   Housekeepers (every inspected room, trolley/pantry line and guest check, scored out of 10):
+//     meets standard: year average 8.0+ and no area below 7.0; improvement plan: 7.0–7.9 or an area below 7.0;
+//     below standard: under 7.0, or 1 in 4+ inspections failed (under 6); not enough evidence: fewer than 12
+//     inspections, or all by one supervisor.
+//   Supervisors (Inspection Rate Program rooms, out of 50): meets: average 40+ and 90%+ rooms pass the 30/50 mark;
+//     improvement plan: 35–39 or 75–89% pass; below: under 35 or under 75% pass; not enough: under 6 sessions or 20 rooms.
+const REVIEW_BANDS = {
+  hk: { meetsAverage: 8, areaMinimum: 7, belowAverage: 7, failedBelow: 6, failedShare: 0.25, minInspections: 12, minSupervisors: 2 },
+  supervisor: { meetsAverage: 40, meetsPassRate: 0.9, belowAverage: 35, belowPassRate: 0.75, minSessions: 6, minRooms: 20 }
+};
+// Allowed range of each band setting: [min, max, whole numbers only].
+const REVIEW_BAND_LIMITS = {
+  hk: { meetsAverage: [0, 10], areaMinimum: [0, 10], belowAverage: [0, 10], failedBelow: [0, 10], failedShare: [0, 1], minInspections: [0, 500, true], minSupervisors: [1, 50, true] },
+  supervisor: { meetsAverage: [0, 50], meetsPassRate: [0, 1], belowAverage: [0, 50], belowPassRate: [0, 1], minSessions: [0, 500, true], minRooms: [0, 5000, true] }
+};
+const REVIEW_DECISIONS = ['undecided', 'renew', 'renew_with_plan', 'do_not_renew'];
+const HK_REVIEW_AREAS = ['cleaning', 'hygiene', 'trolleyPantry', 'guestInteraction'];
+const REVIEW_AREA_LABELS = { cleaning: 'Cleaning', hygiene: 'Hygiene', trolleyPantry: 'Trolley / pantry', guestInteraction: 'Guest interaction' };
+
+const reviewSettings = () => state.settings.find((entry) => entry.id === 'contract-review') || { id: 'contract-review', shareWithAssistants: false, bands: {}, decisions: {}, log: [] };
+function saveReviewSettings(changes) {
+  const next = { ...reviewSettings(), ...changes };
+  state.settings = [...state.settings.filter((entry) => entry.id !== 'contract-review'), next];
+  saveRow('settings', next);
+  return next;
+}
+const reviewBands = () => { const saved = reviewSettings().bands || {}; return { hk: { ...REVIEW_BANDS.hk, ...saved.hk }, supervisor: { ...REVIEW_BANDS.supervisor, ...saved.supervisor } }; };
+const reviewKey = (year, kind, key) => `${year}:${kind}:${kind === 'hk' ? nameKey(key) : key}`;
+
+function requireReviewReader(req, res, next) {
+  const user = currentUser(req);
+  if (user?.role === 'manager' || (user?.role === 'assistant_manager' && reviewSettings().shareWithAssistants)) { req.currentUser = user; return next(); }
+  return res.status(403).json({ message: user?.role === 'assistant_manager' ? 'The manager has not shared contract reviews with assistant managers.' : 'Only the manager can open contract reviews.' });
+}
+function requireReviewOwner(req, res, next) {
+  const user = currentUser(req);
+  if (user?.role !== 'manager') return res.status(403).json({ message: 'Only the manager can change contract reviews.' });
+  req.currentUser = user;
+  return next();
+}
+
+const pct = (share) => `${Math.round(share * 100)}%`;
+// A first-half / second-half comparison of the year's scores: enough to say whether someone is getting better or worse.
+function reviewTrend(timeline, scale) {
+  if (timeline.length < 6) return null;
+  const sorted = [...timeline].sort((a, b) => a.date.localeCompare(b.date));
+  const half = Math.floor(sorted.length / 2);
+  const change = average(sorted.slice(half).map((item) => item.score)) - average(sorted.slice(0, half).map((item) => item.score));
+  const step = scale / 30; // 0.3 out of 10, 1.5 out of 50
+  return { change: round1(change), direction: change >= step ? 'improving' : change <= -step ? 'declining' : 'steady' };
+}
+
+function housekeeperReview(period, bands) {
+  const people = new Map();
+  for (const report of state.reports) {
+    if (!inGoalPeriod(report, period) || ![...HK_POINT_TYPES, 'guest_interaction'].includes(report.type)) continue;
+    for (const entry of scoredEntries(report)) {
+      if (!String(entry.hkName || '').trim()) continue;
+      const guest = report.type === 'guest_interaction';
+      // The inspection's own score: every scored item except the review-only ones (cleaning time).
+      const score = guest ? average(itemScores(entry, INTERACTION_ITEMS)) : average(itemScores(entry, Object.keys(entry.scores || {}).filter((key) => !HK_REVIEW_ITEMS.includes(key))));
+      if (score === null) continue;
+      const key = nameKey(entry.hkName);
+      const row = people.get(key) || { inspections: 0, failed: 0, inspectors: new Set(), timeline: [], areas: Object.fromEntries(HK_REVIEW_AREAS.map((area) => [area, []])), remarks: [] };
+      row.inspections += 1;
+      if (score < bands.failedBelow) row.failed += 1;
+      row.inspectors.add(report.submittedBy);
+      row.timeline.push({ date: report.date, score });
+      const areas = guest ? { guestInteraction: score } : progressValues(report, entry);
+      for (const area of HK_REVIEW_AREAS) if (Number.isFinite(areas[area])) row.areas[area].push(areas[area]);
+      if (String(entry.remarks || '').trim()) row.remarks.push({ date: report.date, text: String(entry.remarks).trim().slice(0, 300), reportId: report.id, score: round1(score) });
+      people.set(key, row);
+    }
+  }
+  return currentRoster().map(({ name }) => {
+    const row = people.get(nameKey(name)) || { inspections: 0, failed: 0, inspectors: new Set(), timeline: [], areas: Object.fromEntries(HK_REVIEW_AREAS.map((area) => [area, []])), remarks: [] };
+    const yearAverage = round1(average(row.timeline.map((item) => item.score)));
+    const areas = Object.fromEntries(HK_REVIEW_AREAS.map((area) => [area, { average: round1(average(row.areas[area])), count: row.areas[area].length }]));
+    const failedShare = row.inspections ? row.failed / row.inspections : 0;
+    const weakAreas = HK_REVIEW_AREAS.filter((area) => areas[area].average !== null && areas[area].average < bands.areaMinimum);
+    const reasons = [];
+    let band;
+    if (row.inspections < bands.minInspections || row.inspectors.size < bands.minSupervisors) {
+      band = 'not_enough';
+      if (row.inspections < bands.minInspections) reasons.push(`${row.inspections} inspection${row.inspections === 1 ? '' : 's'} this year; at least ${bands.minInspections} are needed to judge fairly.`);
+      if (row.inspectors.size < bands.minSupervisors) reasons.push(`Inspected by ${row.inspectors.size} supervisor${row.inspectors.size === 1 ? '' : 's'}; at least ${bands.minSupervisors} are needed so no single inspector decides.`);
+    } else if (yearAverage < bands.belowAverage || failedShare >= bands.failedShare) {
+      band = 'below';
+      if (yearAverage < bands.belowAverage) reasons.push(`Year average ${yearAverage} is below ${bands.belowAverage}.`);
+      if (failedShare >= bands.failedShare) reasons.push(`${row.failed} of ${row.inspections} inspections (${pct(failedShare)}) failed, scoring under ${bands.failedBelow}.`);
+    } else if (yearAverage < bands.meetsAverage || weakAreas.length) {
+      band = 'plan';
+      if (yearAverage < bands.meetsAverage) reasons.push(`Year average ${yearAverage}; ${bands.meetsAverage} meets the standard.`);
+      for (const area of weakAreas) reasons.push(`${REVIEW_AREA_LABELS[area]} averages ${areas[area].average}, below ${bands.areaMinimum}.`);
+    } else {
+      band = 'meets';
+      reasons.push(`Year average ${yearAverage} with every area at ${bands.areaMinimum} or more.`);
+    }
+    return { kind: 'hk', key: name, name, band, reasons, inspections: row.inspections, inspectors: row.inspectors.size, average: yearAverage, failed: row.failed, failedShare: Number(failedShare.toFixed(2)), areas, trend: reviewTrend(row.timeline, 10), remarks: row.remarks.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5) };
+  });
+}
+
+function supervisorReview(period, bands) {
+  const passMark = FLAG_THRESHOLDS.inspection_rate * INSPECTION_ITEMS.length;
+  const points = new Map(supervisorPoints(period).map((row) => [row.id, row.points]));
+  const inPeriod = state.reports.filter((report) => inGoalPeriod(report, period));
+  return state.users.filter((user) => user.role === 'supervisor' && user.active !== false).map((supervisor) => {
+    const sessions = inPeriod.filter((report) => report.type === 'inspection_rate' && report.data?.supervisorId === supervisor.id);
+    const timeline = sessions.flatMap((report) => scoredEntries(report).map(scoreValues).filter((values) => values.length).map((values) => ({ date: report.date, score: sum(values) })));
+    const rooms = timeline.length;
+    const passed = timeline.filter((item) => item.score >= passMark).length;
+    const roomAverage = round1(average(timeline.map((item) => item.score)));
+    const passRate = rooms ? passed / rooms : 0;
+    const reasons = [];
+    let band;
+    if (sessions.length < bands.minSessions || rooms < bands.minRooms) {
+      band = 'not_enough';
+      reasons.push(`${sessions.length} inspection session${sessions.length === 1 ? '' : 's'} and ${rooms} room${rooms === 1 ? '' : 's'} this year; at least ${bands.minSessions} sessions and ${bands.minRooms} rooms are needed to judge fairly.`);
+    } else if (roomAverage < bands.belowAverage || passRate < bands.belowPassRate) {
+      band = 'below';
+      if (roomAverage < bands.belowAverage) reasons.push(`Room average ${roomAverage}/50 is below ${bands.belowAverage}/50.`);
+      if (passRate < bands.belowPassRate) reasons.push(`${pct(passRate)} of rooms passed ${passMark}/50; under ${pct(bands.belowPassRate)}.`);
+    } else if (roomAverage < bands.meetsAverage || passRate < bands.meetsPassRate) {
+      band = 'plan';
+      if (roomAverage < bands.meetsAverage) reasons.push(`Room average ${roomAverage}/50; ${bands.meetsAverage}/50 meets the standard.`);
+      if (passRate < bands.meetsPassRate) reasons.push(`${pct(passRate)} of rooms passed ${passMark}/50; ${pct(bands.meetsPassRate)} meets the standard.`);
+    } else {
+      band = 'meets';
+      reasons.push(`Room average ${roomAverage}/50 and ${pct(passRate)} of rooms passed ${passMark}/50.`);
+    }
+    // Context only, not part of the band: the app doesn't know each supervisor's shifts.
+    const own = inPeriod.filter((report) => report.submittedBy === supervisor.id);
+    return { kind: 'supervisor', key: supervisor.id, name: supervisor.name, band, reasons, sessions: sessions.length, rooms, passed, passRate: Number(passRate.toFixed(2)), passMark, average: roomAverage, points: points.get(supervisor.id) || 0, pointsTarget: POINTS_TARGET.supervisor, reportsFiled: own.filter((report) => report.type !== 'handover').length, handovers: own.filter((report) => report.type === 'handover').length, trend: reviewTrend(timeline, 50) };
+  });
+}
+
+function contractReview(period) {
+  const settings = reviewSettings();
+  const bands = reviewBands();
+  const withDecision = (row) => ({ ...row, decision: settings.decisions?.[reviewKey(period.startYear, row.kind, row.key)] || null });
+  return { period, years: goalYears(), bands, defaults: REVIEW_BANDS, shareWithAssistants: Boolean(settings.shareWithAssistants), housekeepers: housekeeperReview(period, bands.hk).map(withDecision), supervisors: supervisorReview(period, bands.supervisor).map(withDecision) };
+}
+
+app.get('/api/contract-review', authMiddleware, requireReviewReader, (req, res) => {
+  const year = Number(req.query.year);
+  const review = contractReview(goalYears().includes(year) ? goalPeriod(year) : goalPeriod());
+  return res.json({ ...review, canDecide: req.currentUser.role === 'manager' });
+});
+
+app.put('/api/contract-review/decision', authMiddleware, requireReviewOwner, (req, res) => {
+  const { year, kind, key, decision } = req.body || {};
+  if (!goalYears().includes(Number(year))) return res.status(400).json({ message: 'Choose a financial year with reports.' });
+  if (!['hk', 'supervisor'].includes(kind) || typeof key !== 'string' || !key.trim()) return res.status(400).json({ message: 'Choose who the decision is about.' });
+  if (kind === 'hk' && !currentRoster().some((row) => nameKey(row.name) === nameKey(key))) return res.status(400).json({ message: 'That housekeeper is not on the roster.' });
+  if (kind === 'supervisor' && !state.users.some((user) => user.id === key && user.role === 'supervisor')) return res.status(400).json({ message: 'That supervisor was not found.' });
+  if (!REVIEW_DECISIONS.includes(decision)) return res.status(400).json({ message: 'Choose a decision.' });
+  const reason = String(req.body?.reason || '').trim();
+  if (reason.length > 2000) return res.status(400).json({ message: 'Keep the reason under 2000 characters.' });
+  if (['do_not_renew', 'renew_with_plan'].includes(decision) && !reason) return res.status(400).json({ message: 'Write the reason for this decision.' });
+  const settings = reviewSettings();
+  const id = reviewKey(Number(year), kind, key);
+  const entry = { decision, reason, by: req.currentUser.id, byName: req.currentUser.name, at: new Date().toISOString() };
+  // Every change is kept in the log (newest 1000), so earlier decisions and reasons can still be traced.
+  saveReviewSettings({ decisions: { ...settings.decisions, [id]: entry }, log: [...(settings.log || []), { id, ...entry }].slice(-1000) });
+  return res.json({ decision: entry });
+});
+
+app.put('/api/contract-review/settings', authMiddleware, requireReviewOwner, (req, res) => {
+  const body = req.body || {};
+  const changes = {};
+  if (body.shareWithAssistants !== undefined) {
+    if (typeof body.shareWithAssistants !== 'boolean') return res.status(400).json({ message: 'Sharing must be on or off.' });
+    changes.shareWithAssistants = body.shareWithAssistants;
+  }
+  if (body.bands !== undefined) {
+    const bands = reviewBands();
+    for (const kind of ['hk', 'supervisor']) {
+      for (const [field, value] of Object.entries(body.bands?.[kind] || {})) {
+        const limits = REVIEW_BAND_LIMITS[kind][field];
+        if (!limits) return res.status(400).json({ message: `Unknown band setting: ${field}.` });
+        const number = Number(value);
+        const [min, max, whole] = limits;
+        if (!Number.isFinite(number) || number < min || number > max || (whole && !Number.isInteger(number))) return res.status(400).json({ message: `${field} must be ${whole ? 'a whole number ' : ''}between ${min} and ${max}.` });
+        bands[kind][field] = number;
+      }
+    }
+    if (bands.hk.belowAverage > bands.hk.meetsAverage || bands.supervisor.belowAverage > bands.supervisor.meetsAverage || bands.supervisor.belowPassRate > bands.supervisor.meetsPassRate) {
+      return res.status(400).json({ message: '"Below standard" must be lower than "meets standard".' });
+    }
+    changes.bands = bands;
+  }
+  const saved = saveReviewSettings(changes);
+  return res.json({ shareWithAssistants: Boolean(saved.shareWithAssistants), bands: reviewBands() });
+});
+
 app.use((req, res) => {
   res.status(404).json({ message: 'Not found.' });
 });
