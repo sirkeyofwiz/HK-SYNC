@@ -18,12 +18,18 @@ export function SupervisorPointsPanel({ goals, setPage, openSupervisor }) {
   return <section className="panel performance-panel"><div className="panel-title"><div><p className="kicker">SUPERVISOR POINTS · {goals.year}</p><h3>Progress to {target} points</h3><small className="muted">Points from Inspection Rate Program rooms that pass ({IRP_PASS}/50 or more) · target by {deadlineLabel(deadline)}</small></div><button className="text" onClick={() => setPage('goals')}>View tracker →</button></div>
     <div className="perf-list sup-points">{rows.map((row) => <button type="button" key={row.id} className={`perf-row ${row.points >= target ? 'good' : 'goal'}`} onClick={() => openSupervisor(row.id, row.name)}><span className="perf-name"><b>{row.name}</b><small>{row.rooms ? `${row.passedRooms ?? row.rooms} of ${plural(row.rooms, 'room')} passed · avg ${row.roomAverage}/50 · last ${row.lastInspected}` : 'Not inspected yet this year'}</small></span><span className="perf-bar" aria-hidden="true"><i style={{ width: `${Math.min(100, row.points / target * 100)}%` }} /></span><strong>{row.points}<small>/{target}</small></strong></button>)}{!rows.length && <Empty text="No active supervisors yet." />}</div></section>;
 }
+// Every inspected housekeeper is on one of the two lists; each shows the first 5 until "Show all" is tapped.
+const PERF_SHOWN = 5;
+function PerfRows({ rows, tone, openProfile }) {
+  const [all, setAll] = useState(false);
+  return <>{(all ? rows : rows.slice(0, PERF_SHOWN)).map((row) => <PerformanceRow key={row.name} row={row} tone={tone} openProfile={openProfile} />)}{rows.length > PERF_SHOWN && <button type="button" className="text perf-more" onClick={() => setAll(!all)}>{all ? 'Show fewer' : `Show all ${rows.length}`}</button>}</>;
+}
 export function PerformancePanel({ performance, openProfile, setPage }) {
   const { top, support, days, minRooms, goodAt, supportBelow, ranked, inspected } = performance;
   return <section className="panel performance-panel"><div className="panel-title"><div><p className="kicker">HOUSEKEEPER PERFORMANCE · LAST {days} DAYS</p><h3>Who is doing well, who needs support</h3><small className="muted">Average room score out of 10 · {minRooms > 1 ? `housekeepers with at least ${minRooms} inspected rooms · ${ranked} of ${inspected} ranked` : `${plural(inspected, "housekeeper")} inspected`}</small></div><button className="text" onClick={() => setPage('people')}>All profiles →</button></div>
     <div className="perf-columns">
-      <div className="perf-list"><h4 className="good">Performing well <small>{goodAt.toFixed(1)} and above</small></h4>{top.map((row) => <PerformanceRow key={row.name} row={row} tone="good" openProfile={openProfile} />)}{!top.length && <Empty text={`No one at ${goodAt.toFixed(1)} or above in the last ${days} days yet.`} />}</div>
-      <div className="perf-list"><h4 className="poor">Need support <small>below {supportBelow.toFixed(1)}</small></h4>{support.map((row) => <PerformanceRow key={row.name} row={row} tone="poor" openProfile={openProfile} />)}{!support.length && <Empty text={`Nobody below ${supportBelow.toFixed(1)}. Well done, team.`} />}</div>
+      <div className="perf-list"><h4 className="good">Performing well <small>{goodAt.toFixed(1)} and above</small></h4><PerfRows rows={top} tone="good" openProfile={openProfile} />{!top.length && <Empty text={`No one at ${goodAt.toFixed(1)} or above in the last ${days} days yet.`} />}</div>
+      <div className="perf-list"><h4 className="poor">Need support <small>below {supportBelow.toFixed(1)}</small></h4><PerfRows rows={support} tone="poor" openProfile={openProfile} />{!support.length && <Empty text={`Nobody below ${supportBelow.toFixed(1)}. Well done, team.`} />}</div>
     </div></section>;
 }
 // Overview "Supervisor performance": the same two lists for supervisors, from the Inspection Rate Program rooms that
