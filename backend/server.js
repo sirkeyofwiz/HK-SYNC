@@ -10,6 +10,10 @@ import { Server } from 'socket.io';
 import Database from 'better-sqlite3';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import webpush from 'web-push';
+import { registerStore } from './store.js';
+import { registerSupport } from './support.js';
+import { registerNotes } from './notes.js';
+import { prepareRoomCare, registerRoomCare, ROOM_CARE } from './roomcare.js';
 import { backupConfigured, runBackup, listSnapshots, databaseSnapshot, restoreIfRequested, describeError, DAILY_KEEP, MONTHLY_KEEP } from './backup.js';
 
 dotenv.config();
@@ -73,7 +77,7 @@ app.use((req, res, next) => {
 });
 // After any successful change to reports, tasks, goals or staff accounts, tell every open app to reload.
 // The signal carries no data: each app re-reads only what its own user is allowed to see.
-const LIVE_CHANGE = /^\/api\/(reports|tasks|goals|users\/staff|users\/[^/]+\/status)(\/|$)/;
+const LIVE_CHANGE = /^\/api\/(reports|tasks|goals|users\/staff|users\/[^/]+\/(status|role))(\/|$)/;
 app.use((req, res, next) => {
   if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && LIVE_CHANGE.test(req.path)) {
     res.on('finish', () => { if (res.statusCode < 400) io.emit('data:changed', { area: req.path.split('/')[2] }); });
@@ -113,7 +117,8 @@ process.on('uncaughtException', (error) => {
 // so nobody can make the server parse huge bodies on public routes such as sign-in.
 const smallJson = express.json({ limit: '1mb' });
 const reportJson = express.json({ limit: '40mb' });
-app.use((req, res, next) => (req.method === 'POST' && req.path === '/api/reports' ? next() : smallJson(req, res, next)));
+// A new report and a store import (a year of the Excel store books) bring their own larger limits, after sign-in.
+app.use((req, res, next) => (req.method === 'POST' && ['/api/reports', '/api/store/import'].includes(req.path) ? next() : smallJson(req, res, next)));
 // Railway and Render sit one proxy in front of the app; without this every request's IP is the proxy's.
 app.set('trust proxy', 1);
 
@@ -129,11 +134,12 @@ const JWT_SECRET = process.env.JWT_SECRET || 'local-development-secret';
 const APP_TIMEZONE = process.env.APP_TIMEZONE || 'Africa/Dar_es_Salaam';
 const onlineUsers = new Map(); // userId -> Set of socket ids
 const roleReportTypes = {
-  supervisor: ['neglected', 'quality', 'trolley_pantry', 'handover', 'guest_interaction'],
+  supervisor: ['neglected', 'quality', 'trolley_pantry', 'handover', 'guest_interaction', 'mattress_rotation', 'upholstery', 'drainage'],
   storekeeper: ['tools'],
+  store_supervisor: ['tools'],
   driver: ['vehicle'],
-  manager: ['neglected', 'quality', 'trolley_pantry', 'handover', 'vehicle', 'tools', 'inspection_rate', 'guest_interaction'],
-  assistant_manager: ['neglected', 'quality', 'trolley_pantry', 'handover', 'vehicle', 'tools', 'inspection_rate', 'guest_interaction']
+  manager: ['neglected', 'quality', 'trolley_pantry', 'handover', 'vehicle', 'tools', 'inspection_rate', 'guest_interaction', 'mattress_rotation', 'upholstery', 'drainage'],
+  assistant_manager: ['neglected', 'quality', 'trolley_pantry', 'handover', 'vehicle', 'tools', 'inspection_rate', 'guest_interaction', 'mattress_rotation', 'upholstery', 'drainage']
 };
 
 function readState() {
@@ -230,55 +236,78 @@ function goalYears() {
   const first = state.reports.reduce((earliest, report) => (/^\d{4}-\d{2}-\d{2}$/.test(String(report.date)) ? Math.min(earliest, goalYearOf(report.date)) : earliest), current);
   return Array.from({ length: current - first + 1 }, (_, index) => current - index);
 }
-const POINTS_TARGET = { supervisor: 500, hk: 150 };
-const pointsTargets = (period) => ({ ...POINTS_TARGET, deadline: period.end, periodStart: period.start });
+// Supervisors: 500 points a year from Inspection Rate rooms that pass. Housekeepers: four targets a year, one per
+// category (each score adds up to 10 points): Cleaning, Hygiene and Trolley & Pantry 150 each, Guest interaction 90.
+// A housekeeper reaches their goal when all four are met.
+const POINTS_TARGET = { supervisor: 500 };
+const HK_TARGETS = { cleaning: 150, hygiene: 150, trolleyPantry: 150, guestInteraction: 90 };
+const pointsTargets = (period) => ({ ...POINTS_TARGET, hk: HK_TARGETS, deadline: period.end, periodStart: period.start });
 const inGoalPeriod = (report, period) => !report.voided && String(report.date) >= period.start && String(report.date) <= period.end;
 const HK_POINT_TYPES = ['quality', 'neglected', 'trolley_pantry'];
 const sum = (values) => values.reduce((total, value) => total + value, 0);
 const nameKey = (name) => String(name || '').trim().toLowerCase();
 
 // Supervisor points: every room total (out of 50) from Inspection Rate Program reports about them, plus a cumulative history.
+// Supervisor points toward 500: only rooms that pass (30/50 or more, see FLAG_THRESHOLDS) add their total; a failed room
+// adds nothing. The room average still counts every room, so it shows how the supervisor is really doing.
 function supervisorPoints(period) {
+  const passMark = FLAG_THRESHOLDS.inspection_rate * INSPECTION_ITEMS.length;
   const reports = state.reports.filter((report) => report.type === 'inspection_rate' && inGoalPeriod(report, period))
     .sort((a, b) => String(a.date).localeCompare(String(b.date)));
   return state.users.filter((user) => user.role === 'supervisor' && user.active !== false).map((supervisor) => {
     let points = 0;
     let rooms = 0;
+    let passedRooms = 0;
+    let allTotals = 0;
     const history = [];
     for (const report of reports.filter((entry) => entry.data?.supervisorId === supervisor.id)) {
       const totals = scoredEntries(report).map((entry) => scoreValues(entry)).filter((values) => values.length).map(sum);
-      points += sum(totals);
+      const passed = totals.filter((total) => total >= passMark);
+      points += sum(passed);
+      passedRooms += passed.length;
+      allTotals += sum(totals);
       rooms += totals.length;
       history.push({ date: report.date, points });
     }
-    return { id: supervisor.id, name: supervisor.name, points, sessions: history.length, rooms, roomAverage: rooms ? Number((points / rooms).toFixed(1)) : null, lastInspected: history.at(-1)?.date || null, history };
+    return { id: supervisor.id, name: supervisor.name, points, sessions: history.length, rooms, passedRooms, passMark, roomAverage: rooms ? Number((allTotals / rooms).toFixed(1)) : null, lastInspected: history.at(-1)?.date || null, history };
   });
 }
 
-// HK points: each inspected room adds its average score (max 10), whichever report type it came from,
-// so a 17-box Quality Checklist room counts the same as a 3-box Neglected Area room.
+// HK points per category: a Quality Checklist room adds its cleaning score (room average) and its hygiene score
+// (bathroom items); a Neglected Area line its "Cleaning" and "Hygiene"; a Trolley / Pantry line its average; a Guest
+// Interaction Check the average of its three criteria. Each is out of 10, so 150 points is e.g. 15 rooms at 10/10.
 function hkPoints(roster, period) {
   const totals = new Map();
+  const add = (name, category, value) => {
+    if (value === null || value === undefined || !Number.isFinite(value)) return false;
+    const key = nameKey(name);
+    const row = totals.get(key) || { name: String(name).trim(), rooms: 0, categories: Object.fromEntries(Object.keys(HK_TARGETS).map((column) => [column, { points: 0, count: 0 }])) };
+    row.categories[category].points += value;
+    row.categories[category].count += 1;
+    totals.set(key, row);
+    return true;
+  };
   for (const report of state.reports) {
-    if (!inGoalPeriod(report, period) || !HK_POINT_TYPES.includes(report.type)) continue;
+    if (!inGoalPeriod(report, period)) continue;
     for (const entry of scoredEntries(report)) {
-      const values = scoreValues(entry);
-      if (!entry.hkName || !values.length) continue;
-      const key = nameKey(entry.hkName);
-      const current = totals.get(key) || { name: String(entry.hkName).trim(), points: 0, rooms: 0 };
-      current.points += sum(values) / values.length;
-      current.rooms += 1;
-      totals.set(key, current);
+      if (!entry.hkName) continue;
+      if (report.type === 'guest_interaction') { const values = itemScores(entry, INTERACTION_ITEMS); add(entry.hkName, 'guestInteraction', values.length ? average(values) : null); continue; }
+      if (!HK_POINT_TYPES.includes(report.type)) continue;
+      const values = progressValues(report, entry);
+      const counted = ['cleaning', 'hygiene', 'trolleyPantry'].map((column) => add(entry.hkName, column, values[column])).some(Boolean);
+      if (counted) totals.get(nameKey(entry.hkName)).rooms += 1;
     }
   }
-  const rows = roster.map((person) => {
-    const found = totals.get(nameKey(person.name));
-    totals.delete(nameKey(person.name));
-    return { name: person.name, points: Number((found?.points || 0).toFixed(1)), rooms: found?.rooms || 0, onRoster: true };
-  });
+  const shape = (found, name, onRoster) => {
+    const categories = Object.fromEntries(Object.entries(HK_TARGETS).map(([column, target]) => { const points = Number((found?.categories[column].points || 0).toFixed(1)); return [column, { points, count: found?.categories[column].count || 0, target, met: points >= target }]; }));
+    const met = Object.values(categories).filter((category) => category.met).length;
+    // How far along all four are, 0–100 (each category counts up to its target).
+    const progress = Math.round((Object.values(categories).reduce((sum, category) => sum + Math.min(1, category.points / category.target), 0) / Object.keys(HK_TARGETS).length) * 100);
+    return { name, rooms: found?.rooms || 0, categories, met, done: met === Object.keys(HK_TARGETS).length, progress, onRoster };
+  };
+  const rows = roster.map((person) => { const found = totals.get(nameKey(person.name)); totals.delete(nameKey(person.name)); return shape(found, person.name, true); });
   // Names typed in reports that don't match the roster (often typos) are listed separately, not counted in the pass rate.
-  const unmatched = [...totals.values()].map((entry) => ({ ...entry, points: Number(entry.points.toFixed(1)), onRoster: false }));
-  return [...rows, ...unmatched];
+  return [...rows, ...[...totals.values()].map((found) => shape(found, found.name, false))];
 }
 
 // Housekeeping progress columns, each an average of 1-10 scores from supervisor reports:
@@ -444,7 +473,7 @@ function buildProfiles(period) {
       if (report.type === 'guest_interaction') {
         person.checks.push({ date: report.date, scores: Object.fromEntries(INTERACTION_ITEMS.map((item) => [item, itemScore(line.entry, item)])), average: lineAverage, note: line.entry.remarks || '' });
       } else {
-        person.rooms.push({ reportId: report.id, date: report.date, type: TYPE_LABELS[report.type], place: line.place, average: lineAverage, remarks: line.entry.remarks || '' });
+        person.rooms.push({ reportId: report.id, date: report.date, kind: report.type, type: TYPE_LABELS[report.type], place: line.place, average: lineAverage, remarks: line.entry.remarks || '' });
       }
       people.set(key, person);
     }
@@ -463,6 +492,14 @@ function profileFor(name, { people, team }) {
     if (!months.has(month)) months.set(month, []);
     months.get(month).push(room.average);
   }
+  // The same rooms per inspection (one report = one inspection): the latest 30, oldest first, for the trend chart.
+  const inspections = new Map();
+  for (const room of person.rooms) {
+    const visit = inspections.get(room.reportId) || { reportId: room.reportId, date: room.date, kind: room.kind, type: room.type, places: [], values: [] };
+    visit.places.push(room.place);
+    visit.values.push(room.average);
+    inspections.set(room.reportId, visit);
+  }
   return {
     name,
     rooms: person.rooms.length,
@@ -472,6 +509,7 @@ function profileFor(name, { people, team }) {
     weaknesses: rated.filter((item) => item.average < WEAKNESS_BELOW).sort((a, b) => a.average - b.average || b.count - a.count).slice(0, 3),
     items,
     trend: [...months.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([month, values]) => ({ month, average: round1(average(values)), rooms: values.length })),
+    byInspection: [...inspections.values()].sort((a, b) => String(a.date).localeCompare(String(b.date))).slice(-30).map(({ values, places, ...visit }) => ({ ...visit, places: places.filter(Boolean).slice(0, 8), rooms: values.length, average: round1(average(values)) })),
     // Remarks have their own list now, so flagged rooms are the low-scoring ones.
     flagged: person.rooms.filter((room) => room.average < 6).reverse().slice(0, 10),
     remarks: [...person.remarks].reverse().slice(0, 300),
@@ -539,8 +577,9 @@ function scoreValues(entry) {
   return Object.values(entry.scores).filter((score) => score !== '' && score !== null).map(Number).filter((score) => Number.isFinite(score));
 }
 
-// Inspection Rate Program rooms under 40/50 (average below 8) must be re-cleaned before check-in.
-const FLAG_THRESHOLDS = { inspection_rate: 8 };
+// Inspection Rate Program: a room passes at 30/50 or more (an average of 6 per item, lowered from 40/50 on 2026-11-01);
+// rooms below that are flagged and must be re-cleaned before check-in. The app uses the same mark (IRP_PASS).
+const FLAG_THRESHOLDS = { inspection_rate: 6 };
 
 // Older reports carry a placeholder `entries` item on every type, so only read the lists that belong to the report type.
 function scoredEntries(report) {
@@ -561,7 +600,7 @@ function reportSummary(report) {
   const flaggedEntries = entries.filter((entry) => {
     const values = scoreValues(entry);
     const average = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 10;
-    return average < threshold || entry.status === 'Broken' || (report.type !== 'guest_interaction' && Boolean(entry.remarks));
+    return average < threshold || entry.status === 'Broken' || entry.status === 'Issue' || (report.type !== 'guest_interaction' && Boolean(entry.remarks));
   });
   return {
     itemCount: entries.length || (report.data?.items ? report.data.items.length : 0),
@@ -942,7 +981,7 @@ app.get('/api/users/all', authMiddleware, (req, res) => {
 });
 
 // Managers can manage everyone else; assistant managers only field staff, so they can't lock out the manager or each other.
-const FIELD_STAFF_ROLES = ['supervisor', 'driver', 'storekeeper'];
+const FIELD_STAFF_ROLES = ['supervisor', 'driver', 'storekeeper', 'store_supervisor'];
 function canManageRole(actor, role) {
   return actor.role === 'manager' ? role !== 'manager' : FIELD_STAFF_ROLES.includes(role);
 }
@@ -989,6 +1028,20 @@ app.patch('/api/users/:id/status', authMiddleware, requireManager, (req, res) =>
   return res.json({ user: sanitizeUser(user) });
 });
 
+// Move an account to another role (e.g. a supervisor who now runs the store). Their past reports, points and messages stay;
+// what they can see and do follows the new role from their next request. Nobody can make a manager or change themselves.
+app.patch('/api/users/:id/role', authMiddleware, requireManager, (req, res) => {
+  const user = state.users.find((entry) => entry.id === req.params.id);
+  const role = req.body?.role;
+  if (!user) return res.status(404).json({ message: 'User not found.' });
+  if (user.id === req.currentUser.id) return res.status(400).json({ message: 'You cannot change your own role.' });
+  if (![...FIELD_STAFF_ROLES, 'assistant_manager'].includes(role)) return res.status(400).json({ message: 'Choose a valid role.' });
+  if (!canManageRole(req.currentUser, user.role) || !canManageRole(req.currentUser, role)) return res.status(403).json({ message: 'You cannot give this account that role.' });
+  user.role = role;
+  saveRow('users', user);
+  return res.json({ user: sanitizeUser(user) });
+});
+
 app.post('/api/users/:id/reset-password', authMiddleware, requireManager, async (req, res) => {
   const user = state.users.find((entry) => entry.id === req.params.id);
   if (!user) return res.status(404).json({ message: 'User not found.' });
@@ -1017,7 +1070,8 @@ app.get('/api/reports', authMiddleware, (req, res) => {
       data: withoutPhotos(report.data),
       submitter: sanitizeUser(state.users.find((user) => user.id === report.submittedBy) || {}),
       ...reportSummary(report),
-      discussion: discussions.get(`report:${report.id}`) || null
+      discussion: discussions.get(`report:${report.id}`) || null,
+      noteCount: notes.count('report', report.id)
     }))
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   return res.json({ reports });
@@ -1028,7 +1082,7 @@ app.get('/api/reports/:id', authMiddleware, (req, res) => {
   const viewer = currentUser(req);
   const report = state.reports.find((entry) => entry.id === req.params.id && !entry.voided);
   if (!canSeeReport(viewer, report)) return res.status(404).json({ message: 'Report not found.' });
-  return res.json({ report: { ...report, data: withPhotos(report.data), submitter: sanitizeUser(state.users.find((user) => user.id === report.submittedBy) || {}), ...reportSummary(report), threshold: FLAG_THRESHOLDS[report.type] ?? 6, discussion: discussionIndex(req.user.id).get(`report:${report.id}`) || null, canManage: isManagerRole(viewer), canDelete: canDeleteReport(viewer, report), canEdit: canEditReport(viewer, report), editedByName: report.editedBy ? userName(report.editedBy) : null } });
+  return res.json({ report: { ...report, data: withPhotos(report.data), submitter: sanitizeUser(state.users.find((user) => user.id === report.submittedBy) || {}), ...reportSummary(report), threshold: FLAG_THRESHOLDS[report.type] ?? 6, discussion: discussionIndex(req.user.id).get(`report:${report.id}`) || null, canManage: isManagerRole(viewer), canDelete: canDeleteReport(viewer, report), canEdit: canEditReport(viewer, report), editedByName: report.editedBy ? userName(report.editedBy) : null, noteCount: notes.count('report', report.id) } });
 });
 
 // The person a Shift Handover is handed to. Newer apps send their account id; older ones only a typed name,
@@ -1050,6 +1104,9 @@ function handoverReceiver(data, submitterId) {
 // Type-specific checks and tidying for a new or edited report. Returns a message for the person, or null when it is fine.
 // `submitter` is whoever filed the report (an edit by a manager keeps the original submitter).
 function prepareReportData(type, data, submitter) {
+  // Mattress rotation, upholstery and water drainage: see roomcare.js. A housekeeper's name takes the roster's spelling.
+  const careProblem = prepareRoomCare(type, data, (name) => currentRoster().map((row) => row.name).find((rosterName) => nameKey(rosterName) === nameKey(name)) || null);
+  if (careProblem) return careProblem;
   if (type === 'guest_interaction' && (!Array.isArray(data.entries) || !data.entries.length || data.entries.some((entry) => !String(entry?.hkName || '').trim()))) {
     return 'Add the housekeeper being assessed.';
   }
@@ -1057,6 +1114,13 @@ function prepareReportData(type, data, submitter) {
     const evaluated = state.users.find((user) => user.id === data.supervisorId && user.role === 'supervisor' && user.active !== false);
     if (!evaluated) return 'Choose the supervisor being evaluated.';
     data.supervisorName = evaluated.name;
+    // Every room is out of 50, so all five items must be scored: an empty one used to count as 0 and was hidden on the report.
+    const rooms = Array.isArray(data.entries) ? data.entries : [];
+    if (!rooms.length) return 'Add at least one room.';
+    for (const [index, room] of rooms.entries()) {
+      const missing = INSPECTION_ITEMS.filter((item) => [undefined, null, ''].includes(room?.scores?.[item]));
+      if (missing.length) return `${room?.room ? `Room ${room.room}` : `Room ${index + 1}`}: score ${missing.join(', ')}. All five items are needed.`;
+    }
   }
   if (type === 'handover') {
     if (data.receivedById && !handoverReceiver(data, submitter.id)) return 'Choose who is receiving the handover.';
@@ -1164,6 +1228,30 @@ const profilePeriod = (req) => (req.query.period === 'all' ? 'all' : 'year');
 const currentRoster = () => state.goals.find((entry) => entry.id === 'current').hkProgress;
 
 // Names only, for the "HK name" suggestions on report forms (supervisors fill those but can't open Goals).
+// Support plan on profiles: what managers did to help someone who needs attention, and how it turned out. See support.js.
+const support = registerSupport(app, { database, authMiddleware, requireManager, userName: (id) => userName(id), today: () => dateInAppZone(0) });
+
+// Notes for the manager on a report or task, written by whoever can open it. See notes.js.
+const notes = registerNotes(app, {
+  database,
+  authMiddleware,
+  who: (req) => currentUser(req),
+  findItem: (kind, id) => (kind === 'report' ? state.reports : state.tasks).find((item) => item.id === id),
+  canSee: (user, kind, item) => (kind === 'report' ? canSeeReport(user, item) : canSeeTask(user, item)),
+  describe: (kind, item) => (kind === 'report' ? `${REPORT_LABELS[item.type] || 'Report'} · ${item.date}` : `Task: ${item.title}`),
+  managers: () => state.users.filter((user) => isManagerRole(user) && user.active !== false),
+  notify: (userId, notification) => notify(userId, notification),
+  userName: (id) => userName(id),
+  isManagerRole: (user) => isManagerRole(user)
+});
+
+// Room care trackers (mattress rotation, upholstery, water drainage): which rooms and blocks are due. See roomcare.js.
+registerRoomCare(app, { authMiddleware, who: (req) => currentUser(req), reports: () => state.reports, userName: (id) => userName(id), today: () => dateInAppZone(0) });
+
+// Housekeeping store (items, day sheets, occupancy, budgets, consumption reports): see store.js. Hidden until
+// STORE_ENABLED=true is set (Railway variable on the API): its data is kept, but the app shows nothing of it.
+registerStore(app, { database, authMiddleware, findUser: (id) => state.users.find((user) => user.id === id), today: () => dateInAppZone(0), enabled: process.env.STORE_ENABLED === 'true' });
+
 app.get('/api/hk-roster', authMiddleware, (req, res) => {
   return res.json({ names: currentRoster().map((row) => row.name) });
 });
@@ -1186,7 +1274,7 @@ app.get('/api/hk-profiles/:name', authMiddleware, requireManager, (req, res) => 
   const points = goals.hkPoints.find((row) => nameKey(row.name) === nameKey(name));
   return res.json({
     period,
-    profile: { ...profileFor(name, buildProfiles(period)), onRoster: Boolean(progress), progress: progress?.scores || null, interaction: progress?.interaction || null, points: { points: points?.points || 0, target: goals.targets.hk, deadline: goals.targets.deadline } },
+    profile: { ...profileFor(name, buildProfiles(period)), onRoster: Boolean(progress), progress: progress?.scores || null, interaction: progress?.interaction || null, points: { categories: points?.categories || null, met: points?.met || 0, targets: goals.targets.hk, deadline: goals.targets.deadline } },
     rules: { minScores: PROFILE_MIN_SCORES, strengthAt: STRENGTH_AT, weaknessBelow: WEAKNESS_BELOW }
   });
 });
@@ -1328,10 +1416,53 @@ app.get('/api/hk-performance', authMiddleware, requireManager, (req, res) => {
   return res.json({
     days: PERFORMANCE_DAYS, since, minRooms: PERFORMANCE_MIN_ROOMS, goodAt: STRENGTH_AT, supportBelow: WEAKNESS_BELOW,
     inspected: people.size, ranked: ranked.length,
+    supervisors: supervisorPerformance(since),
     top: ranked.filter((row) => row.average >= STRENGTH_AT).sort((a, b) => b.average - a.average || b.rooms - a.rooms).slice(0, 5),
     support: ranked.filter((row) => row.average < WEAKNESS_BELOW).sort((a, b) => a.average - b.average || b.rooms - a.rooms).slice(0, 5)
   });
 });
+
+// Overview "Supervisor performance": the same, for supervisors, from the Inspection Rate Program (managers inspecting a
+// supervisor's rooms) over the last 30 days. A room is out of 50 (five items of 10). The line is the IRP pass mark
+// (30/50, an average of 6): an average of 30/50 or more is doing well, under 30/50 needs support, so every inspected
+// supervisor is on one list. A room under the pass mark has failed.
+// Supervisors with no inspected room in the period are listed, so a manager can go and inspect them.
+function supervisorPerformance(since) {
+  const supervisors = activeSupervisors();
+  const people = new Map();
+  for (const report of state.reports) {
+    if (report.voided || report.type !== 'inspection_rate' || String(report.date) < since) continue;
+    const supervisor = supervisors.find((user) => user.id === report.data?.supervisorId);
+    if (!supervisor) continue;
+    for (const entry of reportLines(report, 'entries')) {
+      const values = scoreValues(entry);
+      if (!values.length) continue;
+      const person = people.get(supervisor.id) || { id: supervisor.id, name: supervisor.name, rooms: 0, total: 0, failed: 0, lastInspected: '', items: new Map() };
+      person.rooms += 1;
+      person.total += sum(values) / values.length;
+      if (sum(values) / values.length < FLAG_THRESHOLDS.inspection_rate) person.failed += 1;
+      if (String(report.date) > person.lastInspected) person.lastInspected = String(report.date);
+      for (const item of INSPECTION_ITEMS) {
+        const value = itemScore(entry, item);
+        if (value !== null) person.items.set(item, [...(person.items.get(item) || []), value]);
+      }
+      people.set(supervisor.id, person);
+    }
+  }
+  const ranked = [...people.values()].map((person) => {
+    const weakest = [...person.items.entries()].map(([label, values]) => ({ label, average: round1(average(values)) })).sort((a, b) => a.average - b.average)[0] || null;
+    const mean = person.total / person.rooms;
+    return { id: person.id, name: person.name, rooms: person.rooms, failed: person.failed, average: round1(mean), roomAverage: round1(mean * 5), lastInspected: person.lastInspected, weakest };
+  });
+  return {
+    inspected: ranked.length,
+    total: supervisors.length,
+    passAt: FLAG_THRESHOLDS.inspection_rate * 5,
+    top: ranked.filter((row) => row.average >= FLAG_THRESHOLDS.inspection_rate).sort((a, b) => b.average - a.average || b.rooms - a.rooms),
+    support: ranked.filter((row) => row.average < FLAG_THRESHOLDS.inspection_rate).sort((a, b) => a.average - b.average || b.rooms - a.rooms),
+    notInspected: supervisors.filter((user) => !people.has(user.id)).map((user) => ({ id: user.id, name: user.name })).sort((a, b) => a.name.localeCompare(b.name))
+  };
+}
 
 // ?year=2026 shows the goals year that started 1 October 2026; anything else shows the current year.
 app.get('/api/goals', authMiddleware, requireManager, (req, res) => {
@@ -1360,6 +1491,7 @@ app.put('/api/goals', authMiddleware, requireManager, (req, res) => {
     const fromKey = nameKey(rename?.from);
     const to = cleanName(rename?.to);
     if (!fromKey || !to || fromKey === nameKey(to) || !goals.hkProgress.some((row) => nameKey(row.name) === nameKey(to))) continue;
+    support.renameHousekeeper(rename.from, to);
     for (const report of state.reports) {
       let changed = false;
       for (const list of ['entries', 'trolleys', 'pantries']) {
@@ -1442,7 +1574,7 @@ app.get('/api/tasks', authMiddleware, (req, res) => {
   const discussions = discussionIndex(req.user.id);
   const viewer = currentUser(req);
   const tasks = state.tasks.filter((task) => canUpdateTask(viewer, task))
-    .map((task) => ({ ...task, discussion: discussions.get(`task:${task.id}`) || null }));
+    .map((task) => ({ ...task, discussion: discussions.get(`task:${task.id}`) || null, noteCount: notes.count('task', task.id) }));
   return res.json({ tasks });
 });
 
@@ -1451,7 +1583,7 @@ app.get('/api/tasks/:id', authMiddleware, (req, res) => {
   const task = state.tasks.find((entry) => entry.id === req.params.id);
   if (!canSeeTask(viewer, task)) return res.status(404).json({ message: 'Task not found.' });
   const nameOf = (id) => state.users.find((user) => user.id === id)?.name || null;
-  return res.json({ task: { ...task, assigneeName: nameOf(task.assignedTo), assignedByName: nameOf(task.assignedBy), discussion: discussionIndex(req.user.id).get(`task:${task.id}`) || null, canUpdate: canUpdateTask(viewer, task), canDelete: isManagerRole(viewer) } });
+  return res.json({ task: { ...task, assigneeName: nameOf(task.assignedTo), assignedByName: nameOf(task.assignedBy), discussion: discussionIndex(req.user.id).get(`task:${task.id}`) || null, canUpdate: canUpdateTask(viewer, task), canDelete: isManagerRole(viewer), noteCount: notes.count('task', task.id) } });
 });
 
 // The choices the app's task form offers; anything else would break sorting and the priority badges.
@@ -1488,6 +1620,7 @@ app.patch('/api/tasks/:id/status', authMiddleware, (req, res) => {
   task.completedAt = status === 'completed' ? task.updatedAt : null;
   task.updatedBy = req.user.id;
   saveRow('tasks', task);
+  if (status === 'completed') clearTaskReminders(task);
   if (previous !== status) {
     const actor = userName(req.user.id);
     const link = { page: 'task', id: task.id };
@@ -1507,6 +1640,43 @@ app.patch('/api/tasks/:id/status', authMiddleware, (req, res) => {
   return res.json({ task });
 });
 
+// ---------- Task reminders ----------
+// An open task (pending or in progress) reminds the person it is assigned to every hour until it is completed. Each
+// reminder replaces the last one on the phone (same alert tag), and only the newest stays unread in the bell. Quiet
+// hours are kept (the reminder waits for the morning), except for urgent tasks. Once a task is past its due date, the
+// manager who assigned it is told, once.
+const TASK_REMINDER_MS = (Number(process.env.TASK_REMINDER_MINUTES) || 60) * 60 * 1000;
+const TASK_REMINDER_CHECK_MS = Number(process.env.TASK_REMINDER_CHECK_MS) || 5 * 60 * 1000;
+const isReminderFor = (task) => (notification) => notification.type === 'task_reminder' && notification.link?.id === task.id;
+function clearTaskReminders(task) {
+  if (task.assignedTo) markNotificationsRead(task.assignedTo, isReminderFor(task));
+}
+function sendTaskReminders() {
+  const now = Date.now();
+  const today = dateInAppZone(0);
+  for (const task of state.tasks) {
+    if (task.voided || task.status === 'completed' || !task.assignedTo) continue;
+    const assignee = state.users.find((user) => user.id === task.assignedTo && user.active !== false);
+    if (!assignee) continue;
+    const overdue = Boolean(task.dueDate && task.dueDate < today);
+    const link = { page: 'task', id: task.id };
+    if (overdue && !task.overdueAlertedAt) {
+      task.overdueAlertedAt = new Date(now).toISOString();
+      saveRow('tasks', task);
+      // Tasks already overdue for over a week when reminders began are long known (the board marks them Overdue).
+      if (task.dueDate >= dateInAppZone(-7) && task.assignedBy !== task.assignedTo) notify(task.assignedBy, { type: 'task', title: 'Task overdue', body: `${task.title} · ${assignee.name} · was due ${task.dueDate}`, link });
+    }
+    if (now - (Date.parse(task.remindedAt || task.createdAt) || 0) < TASK_REMINDER_MS) continue;
+    const urgent = task.priority === 'urgent';
+    if (!urgent && inQuietHours(notifySettings(assignee))) continue;
+    clearTaskReminders(task);
+    task.remindedAt = new Date(now).toISOString();
+    saveRow('tasks', task);
+    notify(assignee.id, { type: 'task_reminder', urgent, title: `Reminder: ${task.status === 'in_progress' ? 'task still in progress' : 'task not started yet'}`, body: `${task.title} · ${task.location}${overdue ? ` · overdue since ${task.dueDate}` : task.dueDate ? ` · due ${task.dueDate}` : ''}. Press Complete when it is done.`, link });
+  }
+}
+setInterval(sendTaskReminders, TASK_REMINDER_CHECK_MS).unref();
+
 // Managers can delete a task (staff only start or complete theirs). Like reports, it is hidden everywhere but kept
 // in the database and backups with who deleted it and when. The assignee is told so they stop working on it.
 app.delete('/api/tasks/:id', authMiddleware, requireManager, (req, res) => {
@@ -1517,6 +1687,7 @@ app.delete('/api/tasks/:id', authMiddleware, requireManager, (req, res) => {
   task.voidedBy = req.user.id;
   task.updatedAt = task.voidedAt;
   saveRow('tasks', task);
+  clearTaskReminders(task);
   if (task.assignedTo && task.status !== 'completed') notify(task.assignedTo, { type: 'task', fromUserId: req.user.id, title: 'Task cancelled', body: `${task.title} · by ${req.currentUser.name}` });
   return res.json({ deleted: true });
 });
@@ -1641,6 +1812,7 @@ function lineLabel(report, list, entry, index) {
   if (list === 'trolleys') return entry.block ? `Trolley · Block ${entry.block}` : `Trolley ${index + 1}`;
   if (list === 'pantries') return entry.block ? `Pantry · Block ${entry.block}` : `Pantry ${index + 1}`;
   if (report.type === 'tools') return entry.tool || `Tool ${index + 1}`;
+  if (report.type === 'drainage') return entry.block || `Block ${index + 1}`;
   if (report.type === 'guest_interaction') return entry.hkName || `Housekeeper ${index + 1}`;
   return entry.room ? `Room ${entry.room}` : `Line ${index + 1}`;
 }
@@ -1700,14 +1872,14 @@ function discussionIndex(userId) {
 // ---------- Notifications ----------
 // Every alert is stored (for the 🔔 list) and pushed to the person's devices unless they have the app open on screen,
 // it's their quiet hours (urgent tasks still come through), or they turned that kind of alert off.
-const NOTIFY_CATEGORY = { message: 'messages', question: 'questions', task: 'tasks', report_signed: 'reportSigned', report_flagged: 'reportFlagged', inspected: 'inspected', handover: 'handovers', reaction: 'reactions' };
+const NOTIFY_CATEGORY = { message: 'messages', question: 'questions', task: 'tasks', task_reminder: 'tasks', report_signed: 'reportSigned', report_flagged: 'reportFlagged', inspected: 'inspected', handover: 'handovers', reaction: 'reactions' };
 const DEFAULT_NOTIFY = {
   categories: { messages: true, questions: true, tasks: true, reportSigned: true, reportFlagged: true, inspected: true, handovers: true, reactions: false },
   quietHours: { enabled: true, start: '22:00', end: '06:00' },
   preview: true,
   sound: true
 };
-const REPORT_LABELS = { neglected: 'Neglected Area', quality: 'Quality Checklist', trolley_pantry: 'Trolley / Pantry', handover: 'Shift Handover', vehicle: 'Vehicle Checklist', tools: 'Tools Control', inspection_rate: 'Inspection Rate Program', guest_interaction: 'Guest Interaction Check' };
+const REPORT_LABELS = { mattress_rotation: ROOM_CARE.mattress_rotation.label, upholstery: ROOM_CARE.upholstery.label, drainage: ROOM_CARE.drainage.label, neglected: 'Neglected Area', quality: 'Quality Checklist', trolley_pantry: 'Trolley / Pantry', handover: 'Shift Handover', vehicle: 'Vehicle Checklist', tools: 'Tools Control', inspection_rate: 'Inspection Rate Program', guest_interaction: 'Guest Interaction Check' };
 const NOTIFICATION_DAYS = 60;
 
 function notifySettings(user) {
@@ -2393,6 +2565,206 @@ app.get('/api/backups/download', authMiddleware, requireManager, requireOwnerMan
   const snapshot = await databaseSnapshot(database, DATA_DIR);
   res.set({ 'Content-Type': 'application/gzip', 'Content-Disposition': `attachment; filename="hk-sync-backup-${appToday()}.sqlite.gz"`, 'Cache-Control': 'no-store' });
   return res.send(snapshot);
+});
+
+// ---------- Contract review ----------
+// End-of-year evidence for renewing housekeepers' and supervisors' contracts, from one financial year's inspections.
+// The app suggests a band; the manager records the decision and the reason. Only the manager can open it, unless they
+// share it with assistant managers (who can then read it, not decide); housekeepers and supervisors never see it.
+// The bands are the hotel's own rules and the manager can change them; these are the starting values.
+//   Housekeepers (every inspected room, trolley/pantry line and guest check, scored out of 10):
+//     meets standard: year average 8.0+ and no area below 7.0; improvement plan: 7.0–7.9 or an area below 7.0;
+//     below standard: under 7.0, or 1 in 4+ inspections failed (under 6); not enough evidence: fewer than 12
+//     inspections, or all by one supervisor.
+//   Supervisors (Inspection Rate Program rooms, out of 50): meets: average 40+ and 90%+ rooms pass the 30/50 mark;
+//     improvement plan: 35–39 or 75–89% pass; below: under 35 or under 75% pass; not enough: under 6 sessions or 20 rooms.
+const REVIEW_BANDS = {
+  hk: { meetsAverage: 8, areaMinimum: 7, belowAverage: 7, failedBelow: 6, failedShare: 0.25, minInspections: 12, minSupervisors: 2 },
+  supervisor: { meetsAverage: 40, meetsPassRate: 0.9, belowAverage: 35, belowPassRate: 0.75, minSessions: 6, minRooms: 20 }
+};
+// Allowed range of each band setting: [min, max, whole numbers only].
+const REVIEW_BAND_LIMITS = {
+  hk: { meetsAverage: [0, 10], areaMinimum: [0, 10], belowAverage: [0, 10], failedBelow: [0, 10], failedShare: [0, 1], minInspections: [0, 500, true], minSupervisors: [1, 50, true] },
+  supervisor: { meetsAverage: [0, 50], meetsPassRate: [0, 1], belowAverage: [0, 50], belowPassRate: [0, 1], minSessions: [0, 500, true], minRooms: [0, 5000, true] }
+};
+const REVIEW_DECISIONS = ['undecided', 'renew', 'renew_with_plan', 'do_not_renew'];
+const HK_REVIEW_AREAS = ['cleaning', 'hygiene', 'trolleyPantry', 'guestInteraction'];
+const REVIEW_AREA_LABELS = { cleaning: 'Cleaning', hygiene: 'Hygiene', trolleyPantry: 'Trolley / pantry', guestInteraction: 'Guest interaction' };
+
+const reviewSettings = () => state.settings.find((entry) => entry.id === 'contract-review') || { id: 'contract-review', shareWithAssistants: false, bands: {}, decisions: {}, log: [] };
+function saveReviewSettings(changes) {
+  const next = { ...reviewSettings(), ...changes };
+  state.settings = [...state.settings.filter((entry) => entry.id !== 'contract-review'), next];
+  saveRow('settings', next);
+  return next;
+}
+const reviewBands = () => { const saved = reviewSettings().bands || {}; return { hk: { ...REVIEW_BANDS.hk, ...saved.hk }, supervisor: { ...REVIEW_BANDS.supervisor, ...saved.supervisor } }; };
+const reviewKey = (year, kind, key) => `${year}:${kind}:${kind === 'hk' ? nameKey(key) : key}`;
+
+function requireReviewReader(req, res, next) {
+  const user = currentUser(req);
+  if (user?.role === 'manager' || (user?.role === 'assistant_manager' && reviewSettings().shareWithAssistants)) { req.currentUser = user; return next(); }
+  return res.status(403).json({ message: user?.role === 'assistant_manager' ? 'The manager has not shared contract reviews with assistant managers.' : 'Only the manager can open contract reviews.' });
+}
+function requireReviewOwner(req, res, next) {
+  const user = currentUser(req);
+  if (user?.role !== 'manager') return res.status(403).json({ message: 'Only the manager can change contract reviews.' });
+  req.currentUser = user;
+  return next();
+}
+
+const pct = (share) => `${Math.round(share * 100)}%`;
+// A first-half / second-half comparison of the year's scores: enough to say whether someone is getting better or worse.
+function reviewTrend(timeline, scale) {
+  if (timeline.length < 6) return null;
+  const sorted = [...timeline].sort((a, b) => a.date.localeCompare(b.date));
+  const half = Math.floor(sorted.length / 2);
+  const change = average(sorted.slice(half).map((item) => item.score)) - average(sorted.slice(0, half).map((item) => item.score));
+  const step = scale / 30; // 0.3 out of 10, 1.5 out of 50
+  return { change: round1(change), direction: change >= step ? 'improving' : change <= -step ? 'declining' : 'steady' };
+}
+
+function housekeeperReview(period, bands) {
+  const people = new Map();
+  for (const report of state.reports) {
+    if (!inGoalPeriod(report, period) || ![...HK_POINT_TYPES, 'guest_interaction'].includes(report.type)) continue;
+    for (const entry of scoredEntries(report)) {
+      if (!String(entry.hkName || '').trim()) continue;
+      const guest = report.type === 'guest_interaction';
+      // The inspection's own score: every scored item except the review-only ones (cleaning time).
+      const score = guest ? average(itemScores(entry, INTERACTION_ITEMS)) : average(itemScores(entry, Object.keys(entry.scores || {}).filter((key) => !HK_REVIEW_ITEMS.includes(key))));
+      if (score === null) continue;
+      const key = nameKey(entry.hkName);
+      const row = people.get(key) || { inspections: 0, failed: 0, inspectors: new Set(), timeline: [], areas: Object.fromEntries(HK_REVIEW_AREAS.map((area) => [area, []])), remarks: [] };
+      row.inspections += 1;
+      if (score < bands.failedBelow) row.failed += 1;
+      row.inspectors.add(report.submittedBy);
+      row.timeline.push({ date: report.date, score });
+      const areas = guest ? { guestInteraction: score } : progressValues(report, entry);
+      for (const area of HK_REVIEW_AREAS) if (Number.isFinite(areas[area])) row.areas[area].push(areas[area]);
+      if (String(entry.remarks || '').trim()) row.remarks.push({ date: report.date, text: String(entry.remarks).trim().slice(0, 300), reportId: report.id, score: round1(score) });
+      people.set(key, row);
+    }
+  }
+  return currentRoster().map(({ name }) => {
+    const row = people.get(nameKey(name)) || { inspections: 0, failed: 0, inspectors: new Set(), timeline: [], areas: Object.fromEntries(HK_REVIEW_AREAS.map((area) => [area, []])), remarks: [] };
+    const yearAverage = round1(average(row.timeline.map((item) => item.score)));
+    const areas = Object.fromEntries(HK_REVIEW_AREAS.map((area) => [area, { average: round1(average(row.areas[area])), count: row.areas[area].length }]));
+    const failedShare = row.inspections ? row.failed / row.inspections : 0;
+    const weakAreas = HK_REVIEW_AREAS.filter((area) => areas[area].average !== null && areas[area].average < bands.areaMinimum);
+    const reasons = [];
+    let band;
+    if (row.inspections < bands.minInspections || row.inspectors.size < bands.minSupervisors) {
+      band = 'not_enough';
+      if (row.inspections < bands.minInspections) reasons.push(`${row.inspections} inspection${row.inspections === 1 ? '' : 's'} this year; at least ${bands.minInspections} are needed to judge fairly.`);
+      if (row.inspectors.size < bands.minSupervisors) reasons.push(`Inspected by ${row.inspectors.size} supervisor${row.inspectors.size === 1 ? '' : 's'}; at least ${bands.minSupervisors} are needed so no single inspector decides.`);
+    } else if (yearAverage < bands.belowAverage || failedShare >= bands.failedShare) {
+      band = 'below';
+      if (yearAverage < bands.belowAverage) reasons.push(`Year average ${yearAverage} is below ${bands.belowAverage}.`);
+      if (failedShare >= bands.failedShare) reasons.push(`${row.failed} of ${row.inspections} inspections (${pct(failedShare)}) failed, scoring under ${bands.failedBelow}.`);
+    } else if (yearAverage < bands.meetsAverage || weakAreas.length) {
+      band = 'plan';
+      if (yearAverage < bands.meetsAverage) reasons.push(`Year average ${yearAverage}; ${bands.meetsAverage} meets the standard.`);
+      for (const area of weakAreas) reasons.push(`${REVIEW_AREA_LABELS[area]} averages ${areas[area].average}, below ${bands.areaMinimum}.`);
+    } else {
+      band = 'meets';
+      reasons.push(`Year average ${yearAverage} with every area at ${bands.areaMinimum} or more.`);
+    }
+    return { kind: 'hk', key: name, name, band, reasons, inspections: row.inspections, inspectors: row.inspectors.size, average: yearAverage, failed: row.failed, failedShare: Number(failedShare.toFixed(2)), areas, trend: reviewTrend(row.timeline, 10), remarks: row.remarks.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5) };
+  });
+}
+
+function supervisorReview(period, bands) {
+  const passMark = FLAG_THRESHOLDS.inspection_rate * INSPECTION_ITEMS.length;
+  const points = new Map(supervisorPoints(period).map((row) => [row.id, row.points]));
+  const inPeriod = state.reports.filter((report) => inGoalPeriod(report, period));
+  return state.users.filter((user) => user.role === 'supervisor' && user.active !== false).map((supervisor) => {
+    const sessions = inPeriod.filter((report) => report.type === 'inspection_rate' && report.data?.supervisorId === supervisor.id);
+    const timeline = sessions.flatMap((report) => scoredEntries(report).map(scoreValues).filter((values) => values.length).map((values) => ({ date: report.date, score: sum(values) })));
+    const rooms = timeline.length;
+    const passed = timeline.filter((item) => item.score >= passMark).length;
+    const roomAverage = round1(average(timeline.map((item) => item.score)));
+    const passRate = rooms ? passed / rooms : 0;
+    const reasons = [];
+    let band;
+    if (sessions.length < bands.minSessions || rooms < bands.minRooms) {
+      band = 'not_enough';
+      reasons.push(`${sessions.length} inspection session${sessions.length === 1 ? '' : 's'} and ${rooms} room${rooms === 1 ? '' : 's'} this year; at least ${bands.minSessions} sessions and ${bands.minRooms} rooms are needed to judge fairly.`);
+    } else if (roomAverage < bands.belowAverage || passRate < bands.belowPassRate) {
+      band = 'below';
+      if (roomAverage < bands.belowAverage) reasons.push(`Room average ${roomAverage}/50 is below ${bands.belowAverage}/50.`);
+      if (passRate < bands.belowPassRate) reasons.push(`${pct(passRate)} of rooms passed ${passMark}/50; under ${pct(bands.belowPassRate)}.`);
+    } else if (roomAverage < bands.meetsAverage || passRate < bands.meetsPassRate) {
+      band = 'plan';
+      if (roomAverage < bands.meetsAverage) reasons.push(`Room average ${roomAverage}/50; ${bands.meetsAverage}/50 meets the standard.`);
+      if (passRate < bands.meetsPassRate) reasons.push(`${pct(passRate)} of rooms passed ${passMark}/50; ${pct(bands.meetsPassRate)} meets the standard.`);
+    } else {
+      band = 'meets';
+      reasons.push(`Room average ${roomAverage}/50 and ${pct(passRate)} of rooms passed ${passMark}/50.`);
+    }
+    // Context only, not part of the band: the app doesn't know each supervisor's shifts.
+    const own = inPeriod.filter((report) => report.submittedBy === supervisor.id);
+    return { kind: 'supervisor', key: supervisor.id, name: supervisor.name, band, reasons, sessions: sessions.length, rooms, passed, passRate: Number(passRate.toFixed(2)), passMark, average: roomAverage, points: points.get(supervisor.id) || 0, pointsTarget: POINTS_TARGET.supervisor, reportsFiled: own.filter((report) => report.type !== 'handover').length, handovers: own.filter((report) => report.type === 'handover').length, trend: reviewTrend(timeline, 50) };
+  });
+}
+
+function contractReview(period) {
+  const settings = reviewSettings();
+  const bands = reviewBands();
+  const withDecision = (row) => ({ ...row, decision: settings.decisions?.[reviewKey(period.startYear, row.kind, row.key)] || null });
+  return { period, years: goalYears(), bands, defaults: REVIEW_BANDS, shareWithAssistants: Boolean(settings.shareWithAssistants), housekeepers: housekeeperReview(period, bands.hk).map(withDecision), supervisors: supervisorReview(period, bands.supervisor).map(withDecision) };
+}
+
+app.get('/api/contract-review', authMiddleware, requireReviewReader, (req, res) => {
+  const year = Number(req.query.year);
+  const review = contractReview(goalYears().includes(year) ? goalPeriod(year) : goalPeriod());
+  return res.json({ ...review, canDecide: req.currentUser.role === 'manager' });
+});
+
+app.put('/api/contract-review/decision', authMiddleware, requireReviewOwner, (req, res) => {
+  const { year, kind, key, decision } = req.body || {};
+  if (!goalYears().includes(Number(year))) return res.status(400).json({ message: 'Choose a financial year with reports.' });
+  if (!['hk', 'supervisor'].includes(kind) || typeof key !== 'string' || !key.trim()) return res.status(400).json({ message: 'Choose who the decision is about.' });
+  if (kind === 'hk' && !currentRoster().some((row) => nameKey(row.name) === nameKey(key))) return res.status(400).json({ message: 'That housekeeper is not on the roster.' });
+  if (kind === 'supervisor' && !state.users.some((user) => user.id === key && user.role === 'supervisor')) return res.status(400).json({ message: 'That supervisor was not found.' });
+  if (!REVIEW_DECISIONS.includes(decision)) return res.status(400).json({ message: 'Choose a decision.' });
+  const reason = String(req.body?.reason || '').trim();
+  if (reason.length > 2000) return res.status(400).json({ message: 'Keep the reason under 2000 characters.' });
+  if (['do_not_renew', 'renew_with_plan'].includes(decision) && !reason) return res.status(400).json({ message: 'Write the reason for this decision.' });
+  const settings = reviewSettings();
+  const id = reviewKey(Number(year), kind, key);
+  const entry = { decision, reason, by: req.currentUser.id, byName: req.currentUser.name, at: new Date().toISOString() };
+  // Every change is kept in the log (newest 1000), so earlier decisions and reasons can still be traced.
+  saveReviewSettings({ decisions: { ...settings.decisions, [id]: entry }, log: [...(settings.log || []), { id, ...entry }].slice(-1000) });
+  return res.json({ decision: entry });
+});
+
+app.put('/api/contract-review/settings', authMiddleware, requireReviewOwner, (req, res) => {
+  const body = req.body || {};
+  const changes = {};
+  if (body.shareWithAssistants !== undefined) {
+    if (typeof body.shareWithAssistants !== 'boolean') return res.status(400).json({ message: 'Sharing must be on or off.' });
+    changes.shareWithAssistants = body.shareWithAssistants;
+  }
+  if (body.bands !== undefined) {
+    const bands = reviewBands();
+    for (const kind of ['hk', 'supervisor']) {
+      for (const [field, value] of Object.entries(body.bands?.[kind] || {})) {
+        const limits = REVIEW_BAND_LIMITS[kind][field];
+        if (!limits) return res.status(400).json({ message: `Unknown band setting: ${field}.` });
+        const number = Number(value);
+        const [min, max, whole] = limits;
+        if (!Number.isFinite(number) || number < min || number > max || (whole && !Number.isInteger(number))) return res.status(400).json({ message: `${field} must be ${whole ? 'a whole number ' : ''}between ${min} and ${max}.` });
+        bands[kind][field] = number;
+      }
+    }
+    if (bands.hk.belowAverage > bands.hk.meetsAverage || bands.supervisor.belowAverage > bands.supervisor.meetsAverage || bands.supervisor.belowPassRate > bands.supervisor.meetsPassRate) {
+      return res.status(400).json({ message: '"Below standard" must be lower than "meets standard".' });
+    }
+    changes.bands = bands;
+  }
+  const saved = saveReviewSettings(changes);
+  return res.json({ shareWithAssistants: Boolean(saved.shareWithAssistants), bands: reviewBands() });
 });
 
 app.use((req, res) => {

@@ -1,6 +1,8 @@
-export const TYPES = { neglected: 'Neglected Area', quality: 'Quality Checklist', trolley_pantry: 'Trolley / Pantry', handover: 'Shift Handover', vehicle: 'Vehicle Checklist', tools: 'Tools Control', inspection_rate: 'Inspection Rate Program', guest_interaction: 'Guest Interaction Check' };
+export const TYPES = { neglected: 'Neglected Area', quality: 'Quality Checklist', trolley_pantry: 'Trolley / Pantry', handover: 'Shift Handover', vehicle: 'Vehicle Checklist', tools: 'Tools Control', inspection_rate: 'Inspection Rate Program', guest_interaction: 'Guest Interaction Check', mattress_rotation: 'Mattress Rotation', upholstery: 'Upholstery Cleaning', drainage: 'Water Drainage' };
 export const QUALITY = ['Doors / balcony', 'Wardrobe', 'Minibar / cabinet', 'Kettle / tray', 'Bench / tables', 'Fan / AC', 'Bed / phone', 'Wall decor / lamp', 'Curtains', 'Armchair / carpet', 'Desk / TV', 'Mirror / glass', 'Counter / sink', 'Shower', 'Towel holder', 'Toilet / WC', 'Floor / skirting'];
 // 'Cleaning time' is off the form until the hotel's standard times per room category and status are agreed (14 Oct 2026).
+// Inspection Rate Program pass mark: a room total of 30/50 or more passes (the server flags below it the same way).
+export const IRP_PASS = 30;
 export const INSPECTION = ['Bathroom', 'Bedroom', 'Balcony', 'Maintenance', 'Presentation Room'];
 // Guest Interaction Check criteria (1-10 each) and what each one means.
 export const INTERACTION = [['English level', 'Speaks English well and can interact with guests'], ['Guest approaching', 'Has the skill to approach a guest'], ['Introduction', 'Can introduce themselves to a guest']];
@@ -8,10 +10,14 @@ export const VEHICLE = ['Tyres', 'Brakes', 'Lights', 'Horn', 'Mirrors', 'Cleanli
 // Reports can be dated up to a week back (late paperwork), never in the future; the server enforces the same rule.
 export const REPORT_BACKDATE_DAYS = 7;
 // What an Overview "focus" shows on the Reports page, across every kind of report.
-export const focusMatch = (item, focus) => (!focus.flagged || item.flagged) && (!focus.personId || item.submittedBy === focus.personId) && (!focus.rooms || (item.itemCount > 0 && item.type !== 'guest_interaction'));
+export const focusMatch = (item, focus) => (!focus.flagged || item.flagged) && (!focus.personId || item.submittedBy === focus.personId) && (!focus.rooms || (item.itemCount > 0 && item.type !== 'guest_interaction' && !NOT_INSPECTIONS.includes(item.type)));
+// Room care logs (mattress rotation, upholstery, water drainage) list rooms or blocks, but they aren't inspections.
+export const NOT_INSPECTIONS = ['mattress_rotation', 'upholstery', 'drainage'];
 export const reportKind = (report) => (report.type === 'handover' ? 'handovers' : report.type === 'vehicle' ? 'vehicles' : 'reports');
-export const emptyEntry = (type) => type === 'guest_interaction' ? { hkName: '', scores: {}, remarks: '' } : type === 'inspection_rate' ? { room: '', scores: {}, remarks: '' } : type === 'quality' ? { room: '', hkName: '', scores: {}, remarks: '' } : type === 'neglected' ? { room: '', hkName: '', scores: {}, remarks: '' } : type === 'trolley_pantry' ? { block: '', hkName: '', scores: {}, remarks: '' } : { tool: '', quantity: '', status: 'Good', assignedTo: '', remarks: '' };
-export const ROLE_TYPES = { supervisor: ['neglected', 'quality', 'trolley_pantry', 'handover', 'guest_interaction'], storekeeper: ['tools'], driver: ['vehicle'], manager: Object.keys(TYPES), assistant_manager: Object.keys(TYPES) };
+export const emptyEntry = (type) => type === 'mattress_rotation' ? { room: '', hkName: '', remarks: '' } : type === 'upholstery' ? { room: '', items: [], remarks: '' } : type === 'drainage' ? { block: '', status: '', remarks: '' } : type === 'guest_interaction' ? { hkName: '', scores: {}, remarks: '' } : type === 'inspection_rate' ? { room: '', scores: {}, remarks: '' } : type === 'quality' ? { room: '', hkName: '', scores: {}, remarks: '' } : type === 'neglected' ? { room: '', hkName: '', scores: {}, remarks: '' } : type === 'trolley_pantry' ? { block: '', hkName: '', scores: {}, remarks: '' } : { tool: '', quantity: '', status: 'Good', assignedTo: '', remarks: '' };
+// How each role is written for people; the stored role names use underscores.
+export const ROLE_NAMES = { supervisor: 'Supervisor', driver: 'Driver', storekeeper: 'Storekeeper', store_supervisor: 'Store supervisor', assistant_manager: 'Assistant Manager', manager: 'Manager' };
+export const ROLE_TYPES = { supervisor: ['neglected', 'quality', 'trolley_pantry', 'handover', 'guest_interaction', 'mattress_rotation', 'upholstery', 'drainage'], storekeeper: ['tools'], store_supervisor: ['tools'], driver: ['vehicle'], manager: Object.keys(TYPES), assistant_manager: Object.keys(TYPES) };
 export const typesForRole = (role) => ROLE_TYPES[role] || [];
 // The housekeepers a report is about, for the Latest reports list ("Amina Said, Pili Omar +2").
 export const HK_REPORT_TYPES = ['quality', 'neglected', 'trolley_pantry', 'guest_interaction'];

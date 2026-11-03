@@ -6,6 +6,11 @@ import { daysAgo, localToday, plural, reportLineLabel } from '../../lib/format';
 // Manager Overview: the remarks supervisors write on room inspections, gathered in one place so nobody has to open
 // report after report. Each remark links to its room line in the report and can become a follow-up task.
 const REMARK_TYPES = ['quality', 'neglected', 'trolley_pantry', 'inspection_rate'];
+// Two audiences, never mixed: what supervisors found in housekeepers' rooms, and what managers found in supervisors' rooms.
+const AUDIENCES = [
+  { key: 'hk', label: 'About housekeepers', from: 'from supervisors', types: ['quality', 'neglected', 'trolley_pantry'], reports: 'Quality, Neglected Area and Trolley / Pantry reports', person: 'housekeeper', kicker: 'WHAT SUPERVISORS FOUND' },
+  { key: 'sup', label: 'About supervisors', from: 'from managers', types: ['inspection_rate'], reports: 'Inspection Rate Program reports', person: 'supervisor', kicker: 'WHAT MANAGERS FOUND' }
+];
 const PERIODS = [['today', 'Today', 0], ['week', '7 days', 6], ['month', '30 days', 29]];
 // Everyday words that keep coming up, in English and Kiswahili. Add to this list to track a new issue.
 const ISSUES = [
@@ -48,7 +53,7 @@ function RemarkRow({ remark, openReport, newTask, showPerson = true, openHk = no
   </div>;
 }
 
-const issueCounts = (remarks) => ISSUES.map(([word, pattern]) => [word, remarks.filter((remark) => pattern.test(remark.text)).length]).filter(([, count]) => count).sort((a, b) => b[1] - a[1]).slice(0, 8);
+export const issueCounts = (remarks) => ISSUES.map(([word, pattern]) => [word, remarks.filter((remark) => pattern.test(remark.text)).length]).filter(([, count]) => count).sort((a, b) => b[1] - a[1]).slice(0, 8);
 const withIssue = (remarks, issue) => { const pattern = ISSUES.find(([word]) => word === issue)?.[1]; return pattern ? remarks.filter((remark) => pattern.test(remark.text)) : remarks; };
 function IssueChips({ issues, issue, pick }) {
   if (!issues.length) return null;
@@ -68,9 +73,11 @@ export function ProfileRemarks({ remarks, period, openReport, newTask }) {
 }
 
 export function RemarksPanel({ reports, openReport, newTask, openHk = nowhere, openSup = nowhere }) {
-  const [period, setPeriod] = useState('week'); const [issue, setIssue] = useState(''); const [grouped, setGrouped] = useState(false); const [all, setAll] = useState(false);
+  const [period, setPeriod] = useState('week'); const [issue, setIssue] = useState(''); const [grouped, setGrouped] = useState(false); const [all, setAll] = useState(false); const [audienceKey, setAudience] = useState('hk');
   const since = daysAgo(PERIODS.find(([key]) => key === period)[2]);
-  const inPeriod = inspectionRemarks(reports).filter((remark) => remark.date >= since);
+  const recent = inspectionRemarks(reports).filter((remark) => remark.date >= since);
+  const audience = AUDIENCES.find((entry) => entry.key === audienceKey);
+  const inPeriod = recent.filter((remark) => audience.types.includes(remark.type));
   const shown = withIssue(inPeriod, issue);
   const LIMIT = 8;
   const groupAverage = (list) => { const scored = list.filter((remark) => remark.score !== null); return scored.length ? Math.round((scored.reduce((sum, remark) => sum + remark.score, 0) / scored.length) * 10) / 10 : null; };
@@ -79,13 +86,14 @@ export function RemarksPanel({ reports, openReport, newTask, openHk = nowhere, o
   const visibleGroups = all ? groups : groups.slice(0, 5);
   const more = grouped ? groups.length - visibleGroups.length : shown.length - Math.min(shown.length, LIMIT);
   return <section className="panel remarks-panel">
-    <div className="panel-title"><div><p className="kicker">WHAT SUPERVISORS FOUND · {period === 'today' ? 'TODAY' : `LAST ${PERIODS.find(([key]) => key === period)[2] + 1} DAYS`}</p><h3>Remarks from inspections</h3><small className="muted">{plural(inPeriod.length, 'remark')} on Quality, Neglected Area, Trolley / Pantry and Inspection Rate reports. Tap one to open that room.</small></div>
-      <div className="remarks-controls"><div className="segmented" role="tablist" aria-label="Period">{PERIODS.map(([key, label]) => <button type="button" role="tab" key={key} aria-selected={period === key} className={period === key ? 'active' : ''} onClick={() => { setPeriod(key); setIssue(''); setAll(false); }}>{label}</button>)}</div><label className="remarks-group"><input type="checkbox" checked={grouped} onChange={(e) => { setGrouped(e.target.checked); setAll(false); }} /> Group by housekeeper</label></div></div>
+    <div className="panel-title"><div><p className="kicker">{audience.kicker} · {period === 'today' ? 'TODAY' : `LAST ${PERIODS.find(([key]) => key === period)[2] + 1} DAYS`}</p><h3>Remarks from inspections</h3><small className="muted">{plural(inPeriod.length, 'remark')} {audience.from} on {audience.reports}. Tap one to open that room.</small></div>
+      <div className="remarks-controls"><div className="segmented" role="tablist" aria-label="Period">{PERIODS.map(([key, label]) => <button type="button" role="tab" key={key} aria-selected={period === key} className={period === key ? 'active' : ''} onClick={() => { setPeriod(key); setIssue(''); setAll(false); }}>{label}</button>)}</div><label className="remarks-group"><input type="checkbox" checked={grouped} onChange={(e) => { setGrouped(e.target.checked); setAll(false); }} /> Group by {audience.person}</label></div></div>
+    <div className="segmented remark-audience" role="tablist" aria-label="Whose remarks">{AUDIENCES.map((entry) => { const count = recent.filter((remark) => entry.types.includes(remark.type)).length; return <button type="button" role="tab" key={entry.key} aria-selected={audienceKey === entry.key} className={audienceKey === entry.key ? 'active' : ''} onClick={() => { setAudience(entry.key); setIssue(''); setAll(false); }}>{entry.label} <small>· {entry.from}</small> <span className="tab-count">{count}</span></button>; })}</div>
     <IssueChips issues={issueCounts(inPeriod)} issue={issue} pick={(word) => { setIssue(word); setAll(false); }} />
-    {!shown.length ? <Empty text={inPeriod.length ? `No remarks mention "${issue}".` : period === 'today' ? 'No remarks written today yet.' : 'No remarks written in this period.'} /> : grouped
+    {!shown.length ? <Empty text={inPeriod.length ? `No remarks mention "${issue}".` : period === 'today' ? `No remarks ${audience.label.toLowerCase()} written today yet.` : `No remarks ${audience.label.toLowerCase()} in this period.`} /> : grouped
       ? <div className="remark-groups">{visibleGroups.map(([name, list]) => { const average = groupAverage(list); return <div className="remark-group" key={name}><div className="remark-group-head"><b>{name === 'No name given' ? name : <NameLink name={name} open={list[0].personRole === 'HK' ? openHk(name) : openSup(list[0].personId, name)} />}</b><small>{plural(list.length, 'remark')}{average !== null ? ` · avg room score ` : ''}{average !== null && <span className={`remark-score inline ${scoreTone(average)}`}>{average}</span>}</small></div>{list.map((remark) => <RemarkRow key={remark.key} remark={remark} openReport={openReport} newTask={newTask} showPerson={false} openSup={openSup} />)}</div>; })}</div>
       : <div className="remark-list">{(all ? shown : shown.slice(0, LIMIT)).map((remark) => <RemarkRow key={remark.key} remark={remark} openReport={openReport} newTask={newTask} openHk={openHk} openSup={openSup} />)}</div>}
-    {more > 0 && <button type="button" className="text remarks-more" onClick={() => setAll(true)}>{grouped ? `Show ${plural(more, 'more housekeeper')} →` : `Show all ${shown.length} remarks →`}</button>}
+    {more > 0 && <button type="button" className="text remarks-more" onClick={() => setAll(true)}>{grouped ? `Show ${plural(more, `more ${audience.person}`)} →` : `Show all ${shown.length} remarks →`}</button>}
     {all && (grouped ? groups.length > 5 : shown.length > LIMIT) && <button type="button" className="text remarks-more" onClick={() => setAll(false)}>Show fewer</button>}
   </section>;
 }
