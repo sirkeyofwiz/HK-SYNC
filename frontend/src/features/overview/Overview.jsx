@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { Empty, MiniArea, MiniBars, MiniGauge, NameLink, Progress, StatCard, clickable } from '../../components/ui';
 import { teamAverage } from '../goals/Goals';
 import { VehicleChecks, vehicleName, vehicleProblems } from '../reports/VehicleChecks';
@@ -16,20 +16,30 @@ export function SupervisorPointsPanel({ goals, setPage, openSupervisor }) {
   const { supervisor: target, deadline } = goals.targets;
   const rows = [...goals.supervisorPoints].sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
   return <section className="panel performance-panel"><div className="panel-title"><div><p className="kicker">SUPERVISOR POINTS · {goals.year}</p><h3>Progress to {target} points</h3><small className="muted">Points from Inspection Rate Program rooms that pass ({IRP_PASS}/50 or more) · target by {deadlineLabel(deadline)}</small></div><button className="text" onClick={() => setPage('goals')}>View tracker →</button></div>
-    <div className="perf-list sup-points">{rows.map((row) => <button type="button" key={row.id} className={`perf-row ${row.points >= target ? 'good' : 'goal'}`} onClick={() => openSupervisor(row.id, row.name)}><span className="perf-name"><b>{row.name}</b><small>{row.rooms ? `${row.passedRooms ?? row.rooms} of ${plural(row.rooms, 'room')} passed · avg ${row.roomAverage}/50 · last ${row.lastInspected}` : 'Not inspected yet this year'}</small></span><span className="perf-bar" aria-hidden="true"><i style={{ width: `${Math.min(100, row.points / target * 100)}%` }} /></span><strong>{row.points}<small>/{target}</small></strong></button>)}{!rows.length && <Empty text="No active supervisors yet." />}</div></section>;
+    <div className="perf-list sup-points"><PerfScroll count={rows.length}>{rows.map((row) => <button type="button" key={row.id} className={`perf-row ${row.points >= target ? 'good' : 'goal'}`} onClick={() => openSupervisor(row.id, row.name)}><span className="perf-name"><b>{row.name}</b><small>{row.rooms ? `${row.passedRooms ?? row.rooms} of ${plural(row.rooms, 'room')} passed · avg ${row.roomAverage}/50 · last ${row.lastInspected}` : 'Not inspected yet this year'}</small></span><span className="perf-bar" aria-hidden="true"><i style={{ width: `${Math.min(100, row.points / target * 100)}%` }} /></span><strong>{row.points}<small>/{target}</small></strong></button>)}</PerfScroll>{!rows.length && <Empty text="No active supervisors yet." />}</div></section>;
 }
-// Every inspected housekeeper is on one of the two lists; each shows the first 5 until "Show all" is tapped.
-const PERF_SHOWN = 5;
-function PerfRows({ rows, tone, openProfile }) {
-  const [all, setAll] = useState(false);
-  return <>{(all ? rows : rows.slice(0, PERF_SHOWN)).map((row) => <PerformanceRow key={row.name} row={row} tone={tone} openProfile={openProfile} />)}{rows.length > PERF_SHOWN && <button type="button" className="text perf-more" onClick={() => setAll(!all)}>{all ? 'Show fewer' : `Show all ${rows.length}`}</button>}</>;
+// Every inspected person is on one of the lists. A list is about five rows tall and scrolls inside itself, so a long
+// list never stretches the page. When it does scroll, a note under it says how many names it holds.
+function PerfScroll({ count, children }) {
+  const box = useRef(null);
+  const [scrolls, setScrolls] = useState(false);
+  useEffect(() => {
+    const element = box.current;
+    if (!element) return undefined;
+    const check = () => setScrolls(element.scrollHeight > element.clientHeight + 1);
+    check();
+    const observer = new ResizeObserver(check);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [count]);
+  return <><div className="perf-scroll" ref={box} tabIndex={scrolls ? 0 : undefined}>{children}</div>{scrolls && <small className="muted perf-count">{count} names · scroll for more</small>}</>;
 }
 export function PerformancePanel({ performance, openProfile, setPage }) {
   const { top, support, days, minRooms, goodAt, supportBelow, ranked, inspected } = performance;
   return <section className="panel performance-panel"><div className="panel-title"><div><p className="kicker">HOUSEKEEPER PERFORMANCE · LAST {days} DAYS</p><h3>Who is doing well, who needs support</h3><small className="muted">Average room score out of 10 · {minRooms > 1 ? `housekeepers with at least ${minRooms} inspected rooms · ${ranked} of ${inspected} ranked` : `${plural(inspected, "housekeeper")} inspected`}</small></div><button className="text" onClick={() => setPage('people')}>All profiles →</button></div>
     <div className="perf-columns">
-      <div className="perf-list"><h4 className="good">Performing well <small>{goodAt.toFixed(1)} and above</small></h4><PerfRows rows={top} tone="good" openProfile={openProfile} />{!top.length && <Empty text={`No one at ${goodAt.toFixed(1)} or above in the last ${days} days yet.`} />}</div>
-      <div className="perf-list"><h4 className="poor">Need support <small>below {supportBelow.toFixed(1)}</small></h4><PerfRows rows={support} tone="poor" openProfile={openProfile} />{!support.length && <Empty text={`Nobody below ${supportBelow.toFixed(1)}. Well done, team.`} />}</div>
+      <div className="perf-list"><h4 className="good">Performing well <small>{goodAt.toFixed(1)} and above</small></h4><PerfScroll count={top.length}>{top.map((row) => <PerformanceRow key={row.name} row={row} tone="good" openProfile={openProfile} />)}</PerfScroll>{!top.length && <Empty text={`No one at ${goodAt.toFixed(1)} or above in the last ${days} days yet.`} />}</div>
+      <div className="perf-list"><h4 className="poor">Need support <small>below {supportBelow.toFixed(1)}</small></h4><PerfScroll count={support.length}>{support.map((row) => <PerformanceRow key={row.name} row={row} tone="poor" openProfile={openProfile} />)}</PerfScroll>{!support.length && <Empty text={`Nobody below ${supportBelow.toFixed(1)}. Well done, team.`} />}</div>
     </div></section>;
 }
 // Overview "Supervisor performance": the same two lists for supervisors, from the Inspection Rate Program rooms that
@@ -45,8 +55,8 @@ export function SupervisorPerformancePanel({ performance, openSupervisor, setPag
   const low = passAt;
   return <section className="panel performance-panel sup-performance"><div className="panel-title"><div><p className="kicker">SUPERVISOR PERFORMANCE · LAST {days} DAYS</p><h3>Who is doing well, who needs support</h3><small className="muted">Average Inspection Rate Program room score out of 50 · {inspected} of {plural(total, 'supervisor')} inspected · {passAt}/50 is the pass mark</small></div><button className="text" onClick={() => setPage('people')}>All profiles →</button></div>
     <div className="perf-columns">
-      <div className="perf-list"><h4 className="good">Performing well <small>{good}/50 and above</small></h4>{top.map((row) => <SupervisorPerformanceRow key={row.id} row={row} tone="good" openSupervisor={openSupervisor} />)}{!top.length && <Empty text={`No supervisor at ${good}/50 or above in the last ${days} days yet.`} />}</div>
-      <div className="perf-list"><h4 className="poor">Need support <small>below {low}/50</small></h4>{support.map((row) => <SupervisorPerformanceRow key={row.id} row={row} tone="poor" openSupervisor={openSupervisor} />)}{!support.length && <Empty text={`No supervisor below ${low}/50. Well done, team.`} />}</div>
+      <div className="perf-list"><h4 className="good">Performing well <small>{good}/50 and above</small></h4><PerfScroll count={top.length}>{top.map((row) => <SupervisorPerformanceRow key={row.id} row={row} tone="good" openSupervisor={openSupervisor} />)}</PerfScroll>{!top.length && <Empty text={`No supervisor at ${good}/50 or above in the last ${days} days yet.`} />}</div>
+      <div className="perf-list"><h4 className="poor">Need support <small>below {low}/50</small></h4><PerfScroll count={support.length}>{support.map((row) => <SupervisorPerformanceRow key={row.id} row={row} tone="poor" openSupervisor={openSupervisor} />)}</PerfScroll>{!support.length && <Empty text={`No supervisor below ${low}/50. Well done, team.`} />}</div>
     </div>
     {notInspected.length > 0 && <p className="muted not-inspected">Not inspected in the last {days} days: {notInspected.map((person, index) => <span key={person.id}>{index ? ', ' : ''}<button type="button" className="text" onClick={() => openSupervisor(person.id, person.name)}>{person.name}</button></span>)}. Add an Inspection Rate Program report to see how they are doing.</p>}
   </section>;

@@ -1540,3 +1540,9 @@ button.chart-bar { border: 0; padding: 0; cursor: pointer; }
   .review-band-grid label { align-items: start; flex-direction: column; }
   .review-decision-foot .primary { width: 100%; }
 }
+
+/* Overview performance lists: about five rows tall, scrolling inside, so a long list never stretches the page */
+.perf-scroll { display: grid; gap: 6px; align-content: start; max-height: 300px; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; scrollbar-width: thin; }
+.perf-scroll:focus-visible { outline: 2px solid var(--accent, #2a78d6); outline-offset: 2px; border-radius: 8px; }
+.perf-count { font-size: 12px; text-align: center; }
+.sup-points .perf-scroll { max-height: 360px; }
