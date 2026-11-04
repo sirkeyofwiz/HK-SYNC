@@ -1388,12 +1388,18 @@ app.get('/api/supervisor-profiles/:id', authMiddleware, requireManager, (req, re
 const PERFORMANCE_DAYS = 30;
 const PERFORMANCE_SPLIT = WEAKNESS_BELOW;
 const PERFORMANCE_MIN_ROOMS = 1;
+// ?from=YYYY-MM-DD&to=YYYY-MM-DD looks back at any past period (e.g. last week or last month); without them it is the
+// last 30 days up to today.
+const PERFORMANCE_DATE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 app.get('/api/hk-performance', authMiddleware, requireManager, (req, res) => {
-  const since = dateInAppZone(-(PERFORMANCE_DAYS - 1));
+  const { from, to } = req.query;
+  if ((from !== undefined && !PERFORMANCE_DATE.test(String(from))) || (to !== undefined && !PERFORMANCE_DATE.test(String(to))) || (from && to && String(from) > String(to))) return res.status(400).json({ message: 'Choose a valid period.' });
+  const since = from ? String(from) : dateInAppZone(-(PERFORMANCE_DAYS - 1));
+  const until = to ? String(to) : dateInAppZone(0);
   const roster = new Map(currentRoster().map(({ name }) => [nameKey(name), name]));
   const people = new Map();
   for (const report of state.reports) {
-    if (report.voided || !HK_POINT_TYPES.includes(report.type) || String(report.date) < since) continue;
+    if (report.voided || !HK_POINT_TYPES.includes(report.type) || String(report.date) < since || String(report.date) > until) continue;
     for (const line of profileLines(report)) {
       const key = nameKey(line.entry?.hkName);
       const values = scoreValues(line.entry);
@@ -1417,9 +1423,9 @@ app.get('/api/hk-performance', authMiddleware, requireManager, (req, res) => {
     return { name: person.name, rooms: person.rooms, average: round1(person.total / person.rooms), lastInspected: person.lastInspected, weakest };
   });
   return res.json({
-    days: PERFORMANCE_DAYS, since, minRooms: PERFORMANCE_MIN_ROOMS, goodAt: PERFORMANCE_SPLIT, supportBelow: PERFORMANCE_SPLIT,
+    days: PERFORMANCE_DAYS, since, until, minRooms: PERFORMANCE_MIN_ROOMS, goodAt: PERFORMANCE_SPLIT, supportBelow: PERFORMANCE_SPLIT,
     inspected: people.size, ranked: ranked.length,
-    supervisors: supervisorPerformance(since),
+    supervisors: supervisorPerformance(since, until),
     top: ranked.filter((row) => row.average >= PERFORMANCE_SPLIT).sort((a, b) => b.average - a.average || b.rooms - a.rooms),
     support: ranked.filter((row) => row.average < PERFORMANCE_SPLIT).sort((a, b) => a.average - b.average || b.rooms - a.rooms)
   });
@@ -1430,12 +1436,12 @@ app.get('/api/hk-performance', authMiddleware, requireManager, (req, res) => {
 // (30/50, an average of 6): an average of 30/50 or more is doing well, under 30/50 needs support, so every inspected
 // supervisor is on one list. A room under the pass mark has failed.
 // Supervisors with no inspected room in the period are listed, so a manager can go and inspect them.
-function supervisorPerformance(since) {
+function supervisorPerformance(since, until = dateInAppZone(0)) {
   const supervisors = activeSupervisors();
   const passAt = FLAG_THRESHOLDS.inspection_rate * INSPECTION_ITEMS.length;
   const people = new Map();
   for (const report of state.reports) {
-    if (report.voided || report.type !== 'inspection_rate' || String(report.date) < since) continue;
+    if (report.voided || report.type !== 'inspection_rate' || String(report.date) < since || String(report.date) > until) continue;
     const supervisor = supervisors.find((user) => user.id === report.data?.supervisorId);
     if (!supervisor) continue;
     for (const entry of reportLines(report, 'entries')) {

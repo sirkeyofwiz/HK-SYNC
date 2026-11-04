@@ -47,3 +47,19 @@ test('only managers see it', async () => {
   const supervisor = await createStaff(server, manager, 'supervisor');
   assert.equal((await server.call('GET', '/api/hk-performance', { token: supervisor.token })).status, 403);
 });
+
+test('a past period (from–to) shows who was doing well and who needed support then', async () => {
+  const past = await createStaff(server, manager, 'supervisor', 'Past Sup');
+  await inspect(past, [room([4, 4, 4, 4, 4])], hotelDate(-40));
+  const from = hotelDate(-45);
+  const to = hotelDate(-35);
+  const then = (await server.call('GET', `/api/hk-performance?from=${from}&to=${to}`, { token: manager })).body;
+  assert.equal(then.since, from);
+  assert.equal(then.until, to);
+  assert.deepEqual(then.supervisors.support.map((row) => [row.name, row.roomAverage]), [['Unseen Sup', 10], ['Past Sup', 20]], 'both were inspected 40 days ago');
+  assert.ok(!then.supervisors.top.some((row) => row.name === 'Strong Sup'), "today's inspections are outside that period");
+  const now = (await server.call('GET', '/api/hk-performance', { token: manager })).body;
+  assert.ok(!now.supervisors.support.some((row) => row.name === 'Past Sup'), 'the last 30 days leave it out');
+  assert.equal((await server.call('GET', '/api/hk-performance?from=2026-13-01', { token: manager })).status, 400);
+  assert.equal((await server.call('GET', `/api/hk-performance?from=${to}&to=${from}`, { token: manager })).status, 400);
+});
