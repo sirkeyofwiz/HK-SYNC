@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Empty } from '../../components/ui';
+import { Icon } from '../../components/icons';
+import { deadlineLabel } from '../../lib/format';
 
 // ---------- Contract review (managers) ----------
 // One financial year's evidence per housekeeper and supervisor, the band the hotel's rules suggest, and the manager's
@@ -95,7 +97,7 @@ function ReviewCard({ row, year, canDecide, request, open, onDecision }) {
       <Fact label="Points" value={`${row.points}/${row.pointsTarget}`} note="context" />
       <Fact label="Reports filed" value={row.reportsFiled} note={`${row.handovers} handovers · context`} />
     </>}</div>
-    {hk && row.remarks.length > 0 && <details className="review-remarks"><summary>Latest inspection remarks ({row.remarks.length})</summary><ul>{row.remarks.map((remark) => <li key={`${remark.reportId}-${remark.text}`}><small>{remark.date} · {remark.score}/10</small> “{remark.text}”</li>)}</ul></details>}
+    {hk && row.remarks.length > 0 && <details className="review-remarks"><summary>Latest inspection remarks ({row.remarks.length})</summary><ul>{row.remarks.map((remark) => <li key={`${remark.reportId}-${remark.text}`}><small>{deadlineLabel(remark.date)} · {remark.score}/10</small> “{remark.text}”</li>)}</ul></details>}
     <DecisionBox row={row} year={year} canDecide={canDecide} request={request} onSaved={onDecision} />
   </article>;
 }
@@ -129,7 +131,7 @@ export function ContractReview({ request, openProfile, openSupervisor, saveExpor
   };
   return <>
     <div className="heading review-heading"><div><p className="kicker">{data.canDecide ? `MANAGER ONLY${data.shareWithAssistants ? ' · SHARED WITH ASSISTANT MANAGERS' : ''}` : 'SHARED BY THE MANAGER · READ ONLY'}</p><h2>Contract review {data.period.label}</h2><p className="muted">Evidence from inspections between {when(data.period.start)} and {when(data.period.end)}. The band is a suggestion from the hotel's rules; the decision and its reason are the manager's.</p></div>
-      <div className="review-tools">{data.years.length > 1 && <select value={data.period.startYear} onChange={(e) => setYear(Number(e.target.value))} aria-label="Financial year">{data.years.map((option) => <option key={option} value={option}>{option}/{String(option + 1).slice(2)}</option>)}</select>}<button type="button" className="secondary" onClick={exportExcel}>↓ Excel</button>{data.canDecide && <button type="button" className="secondary" aria-expanded={settingsOpen} onClick={() => setSettingsOpen(!settingsOpen)}>⚙ Bands & sharing</button>}</div></div>
+      <div className="review-tools">{data.years.length > 1 && <select value={data.period.startYear} onChange={(e) => setYear(Number(e.target.value))} aria-label="Financial year">{data.years.map((option) => <option key={option} value={option}>{option}/{String(option + 1).slice(2)}</option>)}</select>}<button type="button" className="secondary" onClick={exportExcel}><Icon name="download" />Excel</button>{data.canDecide && <button type="button" className="secondary" aria-expanded={settingsOpen} onClick={() => setSettingsOpen(!settingsOpen)}><Icon name="sliders" />Bands & sharing</button>}</div></div>
     {settingsOpen && data.canDecide && <ReviewSettings data={data} request={request} onSaved={() => load()} />}
     <div className="review-filters"><div className="segmented" role="group" aria-label="Who">{[['hk', `Housekeepers (${data.housekeepers.length})`], ['supervisor', `Supervisors (${data.supervisors.length})`]].map(([key, label]) => <button type="button" key={key} className={kind === key ? 'active' : ''} aria-pressed={kind === key} onClick={() => { setKind(key); setBand('all'); }}>{label}</button>)}</div>
       <div className="review-band-filter" role="group" aria-label="Band"><button type="button" className={band === 'all' ? 'active' : ''} aria-pressed={band === 'all'} onClick={() => setBand('all')}>All {rows.length}</button>{Object.entries(REVIEW_BANDS).map(([key, [tone, label]]) => <button type="button" key={key} className={`tag ${tone} ${band === key ? 'active' : ''}`} aria-pressed={band === key} onClick={() => setBand(key)}>{label} {count(rows, key)}</button>)}</div></div>

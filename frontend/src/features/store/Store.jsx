@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Empty } from '../../components/ui';
 import { buildImport, recognise } from './importExcel';
+import { Icon } from '../../components/icons';
 
 // Housekeeping store: the four store books the team kept in Excel, recorded day by day in the app, with the same
 // monthly and season reports. The server (backend/store.js) does every calculation; these screens record and show.
@@ -97,7 +98,7 @@ function MonthTab({ config, book, request, flash, saveExport }) {
     excel([[`${info.short} ${month}`, [[`${info.name} — ${monthLabel(month)}`], [], head, ...rows, ['TOTAL', '', '', '', ...(stock ? ['', '', ''] : []), '', report.totalCost]]], ['Day by day', daily]], `hk-sync-${book}-${month}.xlsx`, saveExport).catch((error) => flash(error.message));
   };
   return <section className="panel store-report">
-    <div className="store-bar"><MonthPicker month={month} setMonth={setMonth} max={config.today.slice(0, 7)} /><div className="store-bar-actions">{report && <button type="button" className={`secondary ${grid ? 'on' : ''}`} onClick={() => setGrid(!grid)}>{grid ? 'Item totals' : 'Day by day'}</button>}{report && <button type="button" className="secondary" onClick={exportMonth}>↓ Excel</button>}</div></div>
+    <div className="store-bar"><MonthPicker month={month} setMonth={setMonth} max={config.today.slice(0, 7)} /><div className="store-bar-actions">{report && <button type="button" className={`secondary ${grid ? 'on' : ''}`} onClick={() => setGrid(!grid)}>{grid ? 'Item totals' : 'Day by day'}</button>}{report && <button type="button" className="secondary" onClick={exportMonth}><Icon name="download" />Excel</button>}</div></div>
     {!report || report.book !== book || report.month !== month ? <Empty text="Loading…" /> : <>
       <div className="store-tiles">
         <Tile label="Total cost" value={`TZS ${tzs(report.totalCost)}`} note={monthLabel(month)} />
@@ -147,7 +148,7 @@ function SeasonTab({ config, book, request, flash, saveExport }) {
   const exportSeason = () => excel([[`${info.short} season`, [[`${info.name} — ${range}`], [], ['Month', 'Cost (TZS)', ...columns.map(([label]) => label)], ...season.months.map((m) => [monthLabel(m.month), m.totalCost, ...columns.map(([, value]) => value(m))]), ['TOTAL', season.totals.totalCost], [], ['Top 10 items', 'Cost (TZS)'], ...season.topItems.map((entry) => [entry.name, entry.cost]), [], ['Category', 'Cost (TZS)'], ...season.categories.map((entry) => [entry.category, entry.cost])]]], `hk-sync-${book}-season-${to}.xlsx`, saveExport).catch((error) => flash(error.message));
   const topPeak = Math.max(1, ...season.topItems.map((entry) => entry.cost));
   return <section className="panel store-report">
-    <div className="store-bar"><MonthPicker month={to} setMonth={setTo} max={config.today.slice(0, 7)} /><span className="muted">{range}</span><div className="store-bar-actions"><button type="button" className="secondary" onClick={exportSeason}>↓ Excel</button></div></div>
+    <div className="store-bar"><MonthPicker month={to} setMonth={setTo} max={config.today.slice(0, 7)} /><span className="muted">{range}</span><div className="store-bar-actions"><button type="button" className="secondary" onClick={exportSeason}><Icon name="download" />Excel</button></div></div>
     <div className="store-tiles">
       <Tile label="Season cost" value={`TZS ${tzs(season.totals.totalCost)}`} note={range} />
       {info.kpi === 'guests' && <><Tile label="Cost per guest" value={`TZS ${tzs(season.totals.costPerGuest)}`} note={`${tzs(season.totals.guests)} guests`} /><Tile label="vs guest budget" value={overUnder(season.totals.totalCost, season.totals.occupancyBudget) || '—'} note={`budget TZS ${tzs(season.totals.occupancyBudget)}`} tone={season.totals.totalCost > season.totals.occupancyBudget ? 'red-text' : 'green-text'} /></>}
@@ -194,12 +195,12 @@ function ItemsTab({ config, book, request, reload, flash }) {
       <label>Unit<input value={draft.unit} onChange={(e) => setDraft({ ...draft, unit: e.target.value })} placeholder="e.g. gallon 20 lt, pcs" maxLength={30} /></label>
       <label>Unit cost (TZS)<input type="number" min="0" step="any" inputMode="decimal" value={draft.unitCost} onChange={(e) => setDraft({ ...draft, unitCost: e.target.value })} required /></label>
       {info.stock && <label>Par stock<input type="number" min="0" inputMode="numeric" value={draft.par ?? ''} onChange={(e) => setDraft({ ...draft, par: e.target.value })} placeholder="reorder below" /></label>}
-      <div className="store-item-actions">{editing && <button type="button" className="secondary" onClick={() => { setEditing(null); setDraft(blank); }}>Cancel</button>}<button className="primary">{editing ? 'Save item' : '＋ Add item'}</button></div>
+      <div className="store-item-actions">{editing && <button type="button" className="secondary" onClick={() => { setEditing(null); setDraft(blank); }}>Cancel</button>}<button className="primary"><Icon name="plus" />{editing ? 'Save item' : 'Add item'}</button></div>
       <small className="muted">A new price applies from now on; months already recorded keep the price they had.</small>
     </form>
     <div className="store-bar"><span className="muted">{items.filter((item) => item.active !== false).length} items in use{items.some((item) => item.active === false) ? ` · ${items.filter((item) => item.active === false).length} no longer used` : ''}</span>{items.some((item) => item.active === false) && <label className="store-check"><input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} /> Show items no longer used</label>}</div>
     <div className="store-table-wrap"><table className="store-table"><thead><tr><th>Item</th><th>Unit</th><th className="num">Unit cost</th>{info.stock && <th className="num">Par</th>}<th /></tr></thead>
-      <tbody>{listed.map((item) => <tr key={item.id} className={item.active === false ? 'quiet' : ''}><td><b>{item.name}</b><small>{item.category}</small></td><td>{item.unit || '—'}</td><td className="num">{tzs(item.unitCost)}</td>{info.stock && <td className="num">{item.par ?? '—'}</td>}<td className="store-row-actions"><button type="button" className="text" onClick={() => { setEditing(item.id); setDraft({ name: item.name, category: item.category, unit: item.unit || '', unitCost: item.unitCost, par: item.par ?? '' }); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>✎ Edit</button><button type="button" className="text" onClick={() => toggle(item)}>{item.active === false ? 'Use again' : 'Stop using'}</button></td></tr>)}</tbody></table></div>
+      <tbody>{listed.map((item) => <tr key={item.id} className={item.active === false ? 'quiet' : ''}><td><b>{item.name}</b><small>{item.category}</small></td><td>{item.unit || '—'}</td><td className="num">{tzs(item.unitCost)}</td>{info.stock && <td className="num">{item.par ?? '—'}</td>}<td className="store-row-actions"><button type="button" className="text" onClick={() => { setEditing(item.id); setDraft({ name: item.name, category: item.category, unit: item.unit || '', unitCost: item.unitCost, par: item.par ?? '' }); window.scrollTo({ top: 0, behavior: 'smooth' }); }}><Icon name="edit" />Edit</button><button type="button" className="text" onClick={() => toggle(item)}>{item.active === false ? 'Use again' : 'Stop using'}</button></td></tr>)}</tbody></table></div>
     {!listed.length && <Empty text="No items yet." />}
   </section>;
 }
@@ -296,7 +297,7 @@ function ImportTab({ config, request, reload }) {
   return <section className="panel store-import">
     <p className="kicker">IMPORT PAST MONTHS</p><h3>From the Excel store books</h3>
     <p className="muted">Choose the four books (Chemical & Tools, Amenities & Stationery, Minibar, Monthly consumption & stock), all at once or one by one. The app reads them on this device, saves every month, then checks its totals against the books. Importing again replaces the same days; nothing is counted twice.</p>
-    <label className="store-file"><input type="file" multiple accept=".xlsx,.xls" onChange={(e) => { choose([...e.target.files]); e.target.value = ''; }} disabled={Boolean(busy)} /><span>＋ Choose Excel files</span></label>
+    <label className="store-file"><input type="file" multiple accept=".xlsx,.xls" onChange={(e) => { choose([...e.target.files]); e.target.value = ''; }} disabled={Boolean(busy)} /><span><Icon name="plus" />Choose Excel files</span></label>
     {files.length > 0 && <ul className="store-files">{files.map((file) => <li key={file.name} className={file.book ? 'ok' : 'bad'}><b>{file.name}</b><span>{file.book ? `→ ${config.books[file.book].name}` : 'not a store book this app knows'}</span></li>)}</ul>}
     {files.length > 0 && <div className="store-import-go"><span className="muted">{Object.keys(books).length} of 4 books chosen</span><button type="button" className="primary" disabled={!Object.keys(books).length || Boolean(busy)} onClick={run}>{busy || `Import ${Object.keys(books).length === 1 ? 'this book' : `these ${Object.keys(books).length} books`}`}</button></div>}
     {busy && !files.length && <p className="muted">{busy}</p>}

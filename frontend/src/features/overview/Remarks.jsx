@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Empty, NameLink, clickable } from '../../components/ui';
 import { TYPES } from '../../lib/constants';
 import { daysAgo, localToday, plural, reportLineLabel } from '../../lib/format';
+import { Icon } from '../../components/icons';
 
 // Manager Overview: the remarks supervisors write on room inspections, gathered in one place so nobody has to open
 // report after report. Each remark links to its room line in the report and can become a follow-up task.
@@ -49,7 +50,7 @@ function RemarkRow({ remark, openReport, newTask, showPerson = true, openHk = no
       <small>{remark.label}{remark.place ? ` · ${remark.place}` : ''} · {TYPES[remark.type]}{showPerson && remark.person ? <> · {remark.personRole} <NameLink name={remark.person} open={remark.personRole === 'HK' ? openHk(remark.person) : openSup(remark.personId, remark.person)} /></> : ''} · by <NameLink name={remark.by || 'Unknown'} open={openSup(remark.byId, remark.by)} /> · {whenLabel(remark.date)}</small>
     </div>
     <span className={`remark-score ${scoreTone(remark.score)}`} title="Average score of this room">{remark.score ?? '—'}</span>
-    <button type="button" className="remark-task" onClick={() => newTask({ title: `${remark.label}: ${remark.text}`.slice(0, 100), location: `${remark.label}${remark.place ? ` · ${remark.place}` : ''}`, assignedTo: remark.byId, priority: 'medium', dueDate: localToday() })}>＋ Task</button>
+    <button type="button" className="remark-task" onClick={() => newTask({ title: `${remark.label}: ${remark.text}`.slice(0, 100), location: `${remark.label}${remark.place ? ` · ${remark.place}` : ''}`, assignedTo: remark.byId, priority: 'medium', dueDate: localToday() })}><Icon name="plus" />Task</button>
   </div>;
 }
 

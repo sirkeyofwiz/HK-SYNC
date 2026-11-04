@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { confirmAction } from '../../components/ConfirmDialog';
 import { plural } from '../../lib/format';
+import { Icon } from '../../components/icons';
 
 // Notes for the manager on a report or task: a supervisor writes one, managers are told and read it on the report or
 // task. `note` = { kind: 'report' | 'task', id, title, subtitle }.
@@ -10,8 +11,8 @@ const when = (iso) => new Date(iso).toLocaleString([], { day: 'numeric', month: 
 // The button beside "Ask": supervisors always get it; managers only once there is a note to read.
 export function NoteButton({ count = 0, me, open, long = false }) {
   if (isManagerRole(me?.role) && !count) return null;
-  const label = isManagerRole(me?.role) ? `📝 ${plural(count, 'note')}` : `📝 ${long ? 'Note for the manager' : 'Note'}${count ? ` · ${count}` : ''}`;
-  return <button type="button" className={`note-button ${count ? 'has-notes' : ''}`} onClick={open} title={isManagerRole(me?.role) ? 'Read the notes on this' : 'Write a note for the manager'}>{label}</button>;
+  const label = isManagerRole(me?.role) ? `${plural(count, 'note')}` : `${long ? 'Note for the manager' : 'Note'}${count ? ` · ${count}` : ''}`;
+  return <button type="button" className={`note-button ${count ? 'has-notes' : ''}`} onClick={open} title={isManagerRole(me?.role) ? 'Read the notes on this' : 'Write a note for the manager'}><Icon name="notes" />{label}</button>;
 }
 
 // The notes on one report or task, oldest first; the writer or a manager can delete one.

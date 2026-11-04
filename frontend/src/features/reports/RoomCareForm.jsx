@@ -2,6 +2,7 @@ import { HkSelect } from './ReportForm';
 import { REPORT_BACKDATE_DAYS, TYPES } from '../../lib/constants';
 import { daysAgo, localToday } from '../../lib/format';
 import { BLOCKS, DRAINAGE_STEPS, UPHOLSTERY_ITEMS } from '../../lib/rooms';
+import { Icon } from '../../components/icons';
 
 // Mattress rotation and upholstery: one card per room. Water drainage: every block in one list, marked Done or Issue.
 const RoomSelect = ({ value, onChange, taken }) => <select value={value || ''} onChange={(e) => onChange(e.target.value)} required><option value="">Choose room</option>{BLOCKS.map((block) => <optgroup key={block.name} label={block.name}>{block.rooms.map((room) => <option key={room} value={room} disabled={room !== value && taken.includes(room)}>{room}</option>)}</optgroup>)}</select>;
@@ -28,7 +29,7 @@ export function RoomCareForm({ type, report, editReport, submit, chooseType, all
         {type === 'upholstery' && <fieldset className="care-items"><legend>Cleaned</legend>{UPHOLSTERY_ITEMS.map((item) => { const on = (entry.items || []).includes(item); return <label key={item} className={`care-item ${on ? 'on' : ''}`}><input type="checkbox" checked={on} onChange={() => update(index, 'items', on ? entry.items.filter((value) => value !== item) : [...(entry.items || []), item])} />{item}</label>; })}</fieldset>}
         <label>Problem found (optional)<textarea value={entry.remarks || ''} onChange={(e) => update(index, 'remarks', e.target.value)} placeholder={type === 'mattress_rotation' ? 'e.g. mattress stained or sagging: the managers are told' : 'e.g. stain that will not come out, torn fabric: the managers are told'} /></label>
       </div>)}
-      <button type="button" className="add" onClick={add}>＋ Add another room</button>
+      <button type="button" className="add" onClick={add}><Icon name="plus" />Add another room</button>
     </div>}
   </form>;
 }

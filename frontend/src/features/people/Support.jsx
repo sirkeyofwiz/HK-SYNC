@@ -4,6 +4,7 @@ import { Empty } from '../../components/ui';
 import { IRP_PASS } from '../../lib/constants';
 import { deadlineLabel, localToday, plural } from '../../lib/format';
 import { issueCounts } from '../overview/Remarks';
+import { Icon } from '../../components/icons';
 
 // Support plan on a profile: what this person needs attention for (worked out from their scores and remarks), and what
 // managers did about it, with a follow-up date and how it turned out.
@@ -46,8 +47,8 @@ export function SupportPanel({ kind, refId, name, problems, request }) {
   const open = actions.filter((action) => action.status === 'in_progress').length;
   const late = actions.filter(overdue).length;
   return <section className="panel support-panel">
-    <div className="panel-title"><div><p className="kicker">SUPPORT PLAN</p><h3>Needs attention & actions taken</h3><small className="muted">{actions.length ? `${plural(actions.length, 'action')} recorded · ${open} in progress${late ? ` · ${plural(late, 'follow-up')} overdue` : ''}` : 'What managers do to help, and how it turns out.'}</small></div>{!form && data && <button type="button" className="primary" onClick={() => setForm(blank(problems[0] || ''))}>＋ Record an action</button>}</div>
-    <div className="support-needs"><p className="kicker">WHAT NEEDS ATTENTION</p>{problems.length ? <div className="support-chips">{problems.map((problem) => <button type="button" key={problem} onClick={() => setForm(blank(problem))} title="Record an action for this">{problem}<b>＋</b></button>)}</div> : <p className="muted">Nothing flagged from their scores in this period.</p>}</div>
+    <div className="panel-title"><div><p className="kicker">SUPPORT PLAN</p><h3>Needs attention & actions taken</h3><small className="muted">{actions.length ? `${plural(actions.length, 'action')} recorded · ${open} in progress${late ? ` · ${plural(late, 'follow-up')} overdue` : ''}` : 'What managers do to help, and how it turns out.'}</small></div>{!form && data && <button type="button" className="primary" onClick={() => setForm(blank(problems[0] || ''))}><Icon name="plus" />Record an action</button>}</div>
+    <div className="support-needs"><p className="kicker">WHAT NEEDS ATTENTION</p>{problems.length ? <div className="support-chips">{problems.map((problem) => <button type="button" key={problem} onClick={() => setForm(blank(problem))} title="Record an action for this">{problem}<b><Icon name="plus" /></b></button>)}</div> : <p className="muted">Nothing flagged from their scores in this period.</p>}</div>
     {form && <form className="support-form" onSubmit={submit}>
       <p className="kicker">{form.id ? 'EDIT ACTION' : `NEW ACTION FOR ${name.toUpperCase()}`}</p>
       <label className="wide">What it's for<input list={`support-problems-${kind}`} value={form.problem} onChange={(e) => setForm({ ...form, problem: e.target.value })} maxLength={200} required placeholder="e.g. Hair in bathrooms" /><datalist id={`support-problems-${kind}`}>{problems.map((problem) => <option key={problem} value={problem} />)}</datalist></label>
@@ -65,7 +66,7 @@ export function SupportPanel({ kind, refId, name, problems, request }) {
       {action.notes && <p className="support-notes">{action.notes}</p>}
       <small className="muted">{deadlineLabel(action.date)} · by {action.byName}{action.followUp ? ` · follow up by ${deadlineLabel(action.followUp)}` : ''}{action.updatedByName ? ` · updated by ${action.updatedByName}` : ''}</small>
       {overdue(action) && <small className="support-overdue">Follow-up overdue: check how they are doing and record the outcome.</small>}
-      <div className="support-item-actions">{action.status === 'in_progress' && <><button type="button" className="secondary" onClick={() => setStatus(action, 'improved')}>✓ Improved</button><button type="button" className="secondary" onClick={() => setStatus(action, 'not_improved')}>✕ Not improved</button></>}{action.status !== 'in_progress' && action.status !== 'closed' && <button type="button" className="secondary" onClick={() => setStatus(action, 'closed')}>Close</button>}<button type="button" className="text" onClick={() => setForm({ ...action, followUp: action.followUp || '', notes: action.notes || '' })}>✎ Edit</button><button type="button" className="text red-text" onClick={() => remove(action)}>Delete</button></div>
+      <div className="support-item-actions">{action.status === 'in_progress' && <><button type="button" className="secondary" onClick={() => setStatus(action, 'improved')}>✓ Improved</button><button type="button" className="secondary" onClick={() => setStatus(action, 'not_improved')}><Icon name="x" />Not improved</button></>}{action.status !== 'in_progress' && action.status !== 'closed' && <button type="button" className="secondary" onClick={() => setStatus(action, 'closed')}>Close</button>}<button type="button" className="text" onClick={() => setForm({ ...action, followUp: action.followUp || '', notes: action.notes || '' })}><Icon name="edit" />Edit</button><button type="button" className="text red-text" onClick={() => remove(action)}>Delete</button></div>
     </article>)}</div>}
   </section>;
 }
