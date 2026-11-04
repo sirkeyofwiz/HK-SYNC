@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Empty, NameLink, clickable } from '../../components/ui';
 import { TYPES } from '../../lib/constants';
 import { daysAgo, localToday, plural, reportLineLabel } from '../../lib/format';
@@ -60,40 +60,52 @@ function IssueChips({ issues, issue, pick }) {
   return <div className="issue-chips"><span className="muted">Common issues:</span>{issues.map(([word, count]) => <button type="button" key={word} className={issue === word ? 'active' : ''} aria-pressed={issue === word} onClick={() => pick(issue === word ? '' : word)}>{word} <b>×{count}</b></button>)}{issue && <button type="button" className="text" onClick={() => pick('')}>Clear</button>}</div>;
 }
 
+// Every remark is in one box about eight remarks tall that scrolls inside itself, so a long list never stretches the
+// page. It goes back to the top when the period, filter or grouping changes; when it scrolls, a note gives the count.
+function RemarksScroll({ count, reset, children }) {
+  const box = useRef(null);
+  const [scrolls, setScrolls] = useState(false);
+  useEffect(() => { if (box.current) box.current.scrollTop = 0; }, [reset]);
+  useEffect(() => {
+    const element = box.current;
+    if (!element) return undefined;
+    const check = () => setScrolls(element.scrollHeight > element.clientHeight + 1);
+    check();
+    const observer = new ResizeObserver(check);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [count, reset]);
+  return <><div className="remarks-scroll" ref={box} tabIndex={scrolls ? 0 : undefined}>{children}</div>{scrolls && <small className="muted perf-count">{plural(count, 'remark')} · scroll for more</small>}</>;
+}
+
 // Housekeeper profile: every remark about this person in the profile's period (the server sends them newest first).
 export function ProfileRemarks({ remarks, period, openReport, newTask }) {
-  const [issue, setIssue] = useState(''); const [all, setAll] = useState(false); const LIMIT = 6;
+  const [issue, setIssue] = useState('');
   const list = remarks.map((remark) => ({ ...remark, key: `${remark.reportId}-${remark.line.list}-${remark.line.index}`, label: remark.place || TYPES[remark.type], place: remark.block && remark.block !== remark.place ? remark.block : '' }));
   const shown = withIssue(list, issue);
   return <section className="panel remarks-panel profile-remarks"><div className="panel-title"><div><p className="kicker">WHAT SUPERVISORS FOUND · {period === 'all' ? 'ALL TIME' : 'THIS FINANCIAL YEAR'}</p><h3>Remarks from inspections</h3><small className="muted">{plural(list.length, 'remark')} about this housekeeper. Tap one to open that room.</small></div></div>
-    <IssueChips issues={issueCounts(list)} issue={issue} pick={(word) => { setIssue(word); setAll(false); }} />
-    {shown.length ? <div className="remark-list">{(all ? shown : shown.slice(0, LIMIT)).map((remark) => <RemarkRow key={remark.key} remark={remark} openReport={openReport} newTask={newTask} showPerson={false} />)}</div> : <Empty text="No remarks written about this housekeeper in this period." />}
-    {shown.length > LIMIT && <button type="button" className="text remarks-more" onClick={() => setAll(!all)}>{all ? 'Show fewer' : `Show all ${shown.length} remarks →`}</button>}
+    <IssueChips issues={issueCounts(list)} issue={issue} pick={setIssue} />
+    {shown.length ? <RemarksScroll count={shown.length} reset={issue}><div className="remark-list">{shown.map((remark) => <RemarkRow key={remark.key} remark={remark} openReport={openReport} newTask={newTask} showPerson={false} />)}</div></RemarksScroll> : <Empty text="No remarks written about this housekeeper in this period." />}
   </section>;
 }
 
 export function RemarksPanel({ reports, openReport, newTask, openHk = nowhere, openSup = nowhere }) {
-  const [period, setPeriod] = useState('week'); const [issue, setIssue] = useState(''); const [grouped, setGrouped] = useState(false); const [all, setAll] = useState(false); const [audienceKey, setAudience] = useState('hk');
+  const [period, setPeriod] = useState('week'); const [issue, setIssue] = useState(''); const [grouped, setGrouped] = useState(false); const [audienceKey, setAudience] = useState('hk');
   const since = daysAgo(PERIODS.find(([key]) => key === period)[2]);
   const recent = inspectionRemarks(reports).filter((remark) => remark.date >= since);
   const audience = AUDIENCES.find((entry) => entry.key === audienceKey);
   const inPeriod = recent.filter((remark) => audience.types.includes(remark.type));
   const shown = withIssue(inPeriod, issue);
-  const LIMIT = 8;
   const groupAverage = (list) => { const scored = list.filter((remark) => remark.score !== null); return scored.length ? Math.round((scored.reduce((sum, remark) => sum + remark.score, 0) / scored.length) * 10) / 10 : null; };
   // Most remarks first; on a tie, the lower room score first (who needs attention most).
   const groups = [...shown.reduce((map, remark) => { const name = remark.person || 'No name given'; map.set(name, [...(map.get(name) || []), remark]); return map; }, new Map()).entries()].sort((a, b) => b[1].length - a[1].length || (groupAverage(a[1]) ?? 10) - (groupAverage(b[1]) ?? 10) || a[0].localeCompare(b[0]));
-  const visibleGroups = all ? groups : groups.slice(0, 5);
-  const more = grouped ? groups.length - visibleGroups.length : shown.length - Math.min(shown.length, LIMIT);
   return <section className="panel remarks-panel">
     <div className="panel-title"><div><p className="kicker">{audience.kicker} · {period === 'today' ? 'TODAY' : `LAST ${PERIODS.find(([key]) => key === period)[2] + 1} DAYS`}</p><h3>Remarks from inspections</h3><small className="muted">{plural(inPeriod.length, 'remark')} {audience.from} on {audience.reports}. Tap one to open that room.</small></div>
-      <div className="remarks-controls"><div className="segmented" role="tablist" aria-label="Period">{PERIODS.map(([key, label]) => <button type="button" role="tab" key={key} aria-selected={period === key} className={period === key ? 'active' : ''} onClick={() => { setPeriod(key); setIssue(''); setAll(false); }}>{label}</button>)}</div><label className="remarks-group"><input type="checkbox" checked={grouped} onChange={(e) => { setGrouped(e.target.checked); setAll(false); }} /> Group by {audience.person}</label></div></div>
-    <div className="segmented remark-audience" role="tablist" aria-label="Whose remarks">{AUDIENCES.map((entry) => { const count = recent.filter((remark) => entry.types.includes(remark.type)).length; return <button type="button" role="tab" key={entry.key} aria-selected={audienceKey === entry.key} className={audienceKey === entry.key ? 'active' : ''} onClick={() => { setAudience(entry.key); setIssue(''); setAll(false); }}>{entry.label} <small>· {entry.from}</small> <span className="tab-count">{count}</span></button>; })}</div>
-    <IssueChips issues={issueCounts(inPeriod)} issue={issue} pick={(word) => { setIssue(word); setAll(false); }} />
+      <div className="remarks-controls"><div className="segmented" role="tablist" aria-label="Period">{PERIODS.map(([key, label]) => <button type="button" role="tab" key={key} aria-selected={period === key} className={period === key ? 'active' : ''} onClick={() => { setPeriod(key); setIssue(''); }}>{label}</button>)}</div><label className="remarks-group"><input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} /> Group by {audience.person}</label></div></div>
+    <div className="segmented remark-audience" role="tablist" aria-label="Whose remarks">{AUDIENCES.map((entry) => { const count = recent.filter((remark) => entry.types.includes(remark.type)).length; return <button type="button" role="tab" key={entry.key} aria-selected={audienceKey === entry.key} className={audienceKey === entry.key ? 'active' : ''} onClick={() => { setAudience(entry.key); setIssue(''); }}>{entry.label} <small>· {entry.from}</small> <span className="tab-count">{count}</span></button>; })}</div>
+    <IssueChips issues={issueCounts(inPeriod)} issue={issue} pick={setIssue} />
     {!shown.length ? <Empty text={inPeriod.length ? `No remarks mention "${issue}".` : period === 'today' ? `No remarks ${audience.label.toLowerCase()} written today yet.` : `No remarks ${audience.label.toLowerCase()} in this period.`} /> : grouped
-      ? <div className="remark-groups">{visibleGroups.map(([name, list]) => { const average = groupAverage(list); return <div className="remark-group" key={name}><div className="remark-group-head"><b>{name === 'No name given' ? name : <NameLink name={name} open={list[0].personRole === 'HK' ? openHk(name) : openSup(list[0].personId, name)} />}</b><small>{plural(list.length, 'remark')}{average !== null ? ` · avg room score ` : ''}{average !== null && <span className={`remark-score inline ${scoreTone(average)}`}>{average}</span>}</small></div>{list.map((remark) => <RemarkRow key={remark.key} remark={remark} openReport={openReport} newTask={newTask} showPerson={false} openSup={openSup} />)}</div>; })}</div>
-      : <div className="remark-list">{(all ? shown : shown.slice(0, LIMIT)).map((remark) => <RemarkRow key={remark.key} remark={remark} openReport={openReport} newTask={newTask} openHk={openHk} openSup={openSup} />)}</div>}
-    {more > 0 && <button type="button" className="text remarks-more" onClick={() => setAll(true)}>{grouped ? `Show ${plural(more, `more ${audience.person}`)} →` : `Show all ${shown.length} remarks →`}</button>}
-    {all && (grouped ? groups.length > 5 : shown.length > LIMIT) && <button type="button" className="text remarks-more" onClick={() => setAll(false)}>Show fewer</button>}
+      ? <RemarksScroll count={shown.length} reset={`${period}-${audienceKey}-${issue}-${grouped}`}><div className="remark-groups">{groups.map(([name, list]) => { const average = groupAverage(list); return <div className="remark-group" key={name}><div className="remark-group-head"><b>{name === 'No name given' ? name : <NameLink name={name} open={list[0].personRole === 'HK' ? openHk(name) : openSup(list[0].personId, name)} />}</b><small>{plural(list.length, 'remark')}{average !== null ? ` · avg room score ` : ''}{average !== null && <span className={`remark-score inline ${scoreTone(average)}`}>{average}</span>}</small></div>{list.map((remark) => <RemarkRow key={remark.key} remark={remark} openReport={openReport} newTask={newTask} showPerson={false} openSup={openSup} />)}</div>; })}</div></RemarksScroll>
+      : <RemarksScroll count={shown.length} reset={`${period}-${audienceKey}-${issue}-${grouped}`}><div className="remark-list">{shown.map((remark) => <RemarkRow key={remark.key} remark={remark} openReport={openReport} newTask={newTask} openHk={openHk} openSup={openSup} />)}</div></RemarksScroll>}
   </section>;
 }
