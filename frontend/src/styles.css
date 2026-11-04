@@ -1559,3 +1559,9 @@ button.chart-bar { border: 0; padding: 0; cursor: pointer; }
   .entry-title:has(.entry-remove) { flex-wrap: wrap; row-gap: 8px; }
   .entry-title .entry-remove { margin-left: auto; }
 }
+
+/* Overview: five stat cards (Trolleys & pantries has its own); on phones the last one spans the row */
+.stat-cards { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .stat-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .stat-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .stat-cards > :last-child:nth-child(odd) { grid-column: 1 / -1; } }
+.stat-cards .stat-body { grid-template-areas: "value chart" "note note"; } /* five narrower cards: the note uses the full width */

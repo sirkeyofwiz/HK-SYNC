@@ -10,9 +10,11 @@ export const VEHICLE = ['Tyres', 'Brakes', 'Lights', 'Horn', 'Mirrors', 'Cleanli
 // Reports can be dated up to a week back (late paperwork), never in the future; the server enforces the same rule.
 export const REPORT_BACKDATE_DAYS = 7;
 // What an Overview "focus" shows on the Reports page, across every kind of report.
-export const focusMatch = (item, focus) => (!focus.flagged || item.flagged) && (!focus.personId || item.submittedBy === focus.personId) && (!focus.rooms || (item.itemCount > 0 && item.type !== 'guest_interaction' && !NOT_INSPECTIONS.includes(item.type)));
+export const focusMatch = (item, focus) => (!focus.flagged || item.flagged) && (!focus.personId || item.submittedBy === focus.personId) && (!focus.rooms || (item.itemCount > 0 && !NOT_ROOMS.includes(item.type) && !NOT_INSPECTIONS.includes(item.type))) && (!focus.checks || (item.itemCount > 0 && item.type === 'trolley_pantry'));
 // Room care logs (mattress rotation, upholstery, water drainage) list rooms or blocks, but they aren't inspections.
 export const NOT_INSPECTIONS = ['mattress_rotation', 'upholstery', 'drainage'];
+// Not rooms: a Guest Interaction Check is about a person, and Trolley / Pantry counts trolleys and pantries (their own card).
+export const NOT_ROOMS = ['guest_interaction', 'trolley_pantry'];
 export const reportKind = (report) => (report.type === 'handover' ? 'handovers' : report.type === 'vehicle' ? 'vehicles' : 'reports');
 export const emptyEntry = (type) => type === 'mattress_rotation' ? { room: '', hkName: '', remarks: '' } : type === 'upholstery' ? { room: '', items: [], remarks: '' } : type === 'drainage' ? { block: '', status: '', remarks: '' } : type === 'guest_interaction' ? { hkName: '', scores: {}, remarks: '' } : type === 'inspection_rate' ? { room: '', scores: {}, remarks: '' } : type === 'quality' ? { room: '', hkName: '', scores: {}, remarks: '' } : type === 'neglected' ? { room: '', hkName: '', scores: {}, remarks: '' } : type === 'trolley_pantry' ? { block: '', hkName: '', scores: {}, remarks: '' } : { tool: '', quantity: '', status: 'Good', assignedTo: '', remarks: '' };
 // How each role is written for people; the stored role names use underscores.
