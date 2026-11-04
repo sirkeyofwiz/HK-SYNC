@@ -597,10 +597,12 @@ function reportSummary(report) {
   // Report-level remarks (handover, vehicle notes) are information, not a problem: a handover is flagged only when
   // the supervisor ticks "Needs a manager", and a vehicle checklist only when an item is Not OK.
   const needsManager = report.type === 'handover' && report.data?.needsManager === true;
+  // A room needs attention for a low score (or a Broken / Issue status) only. Supervisors write a remark on most rooms,
+  // good ones too, so a remark alone doesn't flag it; remarks still show on the report and in "Remarks from inspections".
   const flaggedEntries = entries.filter((entry) => {
     const values = scoreValues(entry);
     const average = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 10;
-    return average < threshold || entry.status === 'Broken' || entry.status === 'Issue' || (report.type !== 'guest_interaction' && Boolean(entry.remarks));
+    return average < threshold || entry.status === 'Broken' || entry.status === 'Issue';
   });
   return {
     itemCount: entries.length || (report.data?.items ? report.data.items.length : 0),

@@ -68,6 +68,15 @@ test('a low score flags the report and alerts the managers', async () => {
   assert.ok(alerts.body.notifications.some((alert) => alert.type === 'report_flagged' && alert.link?.id === body.report.id));
 });
 
+test('a remark alone does not flag a room: only a low score does', async () => {
+  const good = await submit(qualityReport(8, { remarks: 'Sofa bed dusting not good' }));
+  assert.equal(good.body.report.flagged, false);
+  assert.equal(good.body.report.flaggedCount, 0);
+  const low = await submit(qualityReport(5, { remarks: 'Bathroom floor dirty' }));
+  assert.equal(low.body.report.flagged, true);
+  assert.equal(low.body.report.flaggedCount, 1);
+});
+
 test('a handover that needs a manager must say why', async () => {
   const handover = (data) => ({ type: 'handover', date: hotelDate(), data: { notes: '', ...data } });
   assert.equal((await submit(handover({ needsManager: true }))).status, 400);
