@@ -1658,8 +1658,8 @@ button > .icon { width: 16px; height: 16px; flex: 0 0 auto; }
 .quick button > span > .icon { width: 15px; height: 15px; }
 /* Report register: the action buttons get the room they need and stay on one row */
 @media (min-width: 900px) {
-  .table.dense .table-head, .table.dense .table-row { grid-template-columns: minmax(170px, 1.5fr) minmax(110px, 1fr) minmax(100px, .8fr) minmax(130px, .9fr) 236px; }
-  .table.dense .row-actions { flex-wrap: nowrap; }
+  .report-register .table-head, .report-register .table-row { grid-template-columns: minmax(170px, 1.5fr) minmax(110px, 1fr) minmax(100px, .8fr) minmax(130px, .9fr) 236px; }
+  .report-register .row-actions { flex-wrap: nowrap; }
 }
 /* Small action buttons (Sign off, Ask, Start, Edit…) in the same blue family as the main buttons; Delete stays red */
 .row-actions button:not(.danger):not(.delete) { background: #eaf1ff; color: #1d4ed8; }
