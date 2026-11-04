@@ -1690,3 +1690,33 @@ summary { color: #1d4ed8; }
 /* 7 (continued): table headings, priorities, room numbers and tile labels in the app's own font too */
 .table-head, .priority, .entry-title > b, .vehicle-stats small:first-child, .store-tile > small:first-child, .store-table th, .hk-target-head { font-family: Satoshi, "Segoe UI", system-ui, sans-serif; font-weight: 700; letter-spacing: .5px; }
 .priority { font-size: 10px; }
+
+/* ---------- Tidy-up 3: Goals, profiles, People, Account ---------- */
+/* 1. Goals: supervisor points across the full width */
+.goals-points > .points:first-child { grid-column: 1 / -1; }
+/* 2. Goals: under each name, "Edit name" and "View profile" side by side as quiet links */
+.progress-table .name-cell { display: flex; flex-wrap: wrap; align-items: center; column-gap: 14px; row-gap: 2px; }
+.progress-table .name-view { display: contents; }
+.progress-table .hk-name { flex: 0 0 100%; }
+.progress-table .edit-name { background: none; padding: 0; font-size: 12px; }
+.progress-table .profile-link { font-size: 12px; }
+.progress-table .renamed { flex: 0 0 100%; order: 5; }
+.saved-note { font-size: 12px; }
+/* 3. Charts: numbers in the app's own font */
+.chart-axis, .chart-column small, .chart-bar b { font-family: Satoshi, "Segoe UI", system-ui, sans-serif; font-weight: 600; }
+/* 4. Empty panels: less blank space */
+.empty { padding: 18px 16px; }
+/* 5. Profile summary cards: one plain style, no coloured tops */
+.metric { border: 1px solid var(--line); border-top-width: 1px; border-radius: 10px; }
+.metric.green, .metric.red, .metric.gold { border-color: var(--line); }
+/* 6. People: room for "Temporary password" */
+.staff-form { grid-template-columns: 1.1fr 1.3fr 1.3fr .9fr auto; }
+/* 7. Account: the panels side by side; switches blue */
+.account-page { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
+.account-page > .heading { grid-column: 1 / -1; margin-bottom: 0; }
+.account-page .account { max-width: none; margin: 0; }
+.account-page .notify-settings { grid-column: 2; grid-row: 2 / span 3; }
+@media (max-width: 900px) { .account-page { grid-template-columns: 1fr; } .account-page .notify-settings { grid-column: auto; grid-row: auto; } }
+.switch-row input:checked { background: #2563eb; }
+.progress-table .name-cell { justify-content: flex-start; justify-self: stretch; text-align: left; }
+.progress-table .name-cell { flex-direction: row; align-items: baseline; }
