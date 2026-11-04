@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { INSPECTION, IRP_PASS } from '../lib/constants';
 
 // Overview stat cards: a figure, its change since yesterday, and a small chart of the last 7 days.
@@ -41,3 +41,20 @@ export function Sparkline({ history }) { if (history.length < 2) return <span cl
 export function useDraft(rows) { const saved = JSON.stringify(rows); const [draft, setDraft] = useState(rows); useEffect(() => setDraft(rows), [saved]); const update = (index, key, value) => setDraft((current) => current.map((row, i) => i === index ? { ...row, [key]: value } : row)); const tools = { add: (row) => setDraft((current) => [...current, row]), remove: (index) => setDraft((current) => current.filter((_, i) => i !== index)), reset: () => setDraft(rows), dirty: JSON.stringify(draft) !== saved }; return [draft, update, tools]; }
 export function SaveBar({ tools, onSave }) { return <div className="save-bar">{tools.dirty && <span className="unsaved">Unsaved changes</span>}{tools.dirty && <button type="button" className="text" onClick={tools.reset}>Undo</button>}<button className="primary" disabled={!tools.dirty} onClick={onSave}>Save</button></div>; }
 export function Empty({ text }) { return <div className="empty">{text}</div>; }
+
+// A list that scrolls inside a box of fixed height, so it never stretches the page. When it does scroll, a note under
+// it says how many it holds (e.g. "38 items · scroll for more").
+export function ScrollBox({ count, noun, className = '', children }) {
+  const box = useRef(null);
+  const [scrolls, setScrolls] = useState(false);
+  useEffect(() => {
+    const element = box.current;
+    if (!element) return undefined;
+    const check = () => setScrolls(element.scrollHeight > element.clientHeight + 1);
+    check();
+    const observer = new ResizeObserver(check);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [count]);
+  return <><div className={`scroll-box ${className}`} ref={box} tabIndex={scrolls ? 0 : undefined}>{children}</div>{scrolls && <small className="muted scroll-box-note">{count} {noun} · scroll for more</small>}</>;
+}

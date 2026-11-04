@@ -1570,3 +1570,10 @@ button.chart-bar { border: 0; padding: 0; cursor: pointer; }
 .panel-head-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
 .perf-period select { width: auto; min-width: 140px; padding: 7px 30px 7px 10px; font-size: 13px; border-radius: 8px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+/* Lists that scroll inside their own box (profiles: every item) */
+.scroll-box { max-height: 440px; overflow-y: auto; overscroll-behavior: contain; padding-right: 6px; scrollbar-width: thin; }
+.scroll-box:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+.scroll-box-note { display: block; margin-top: 8px; font-size: 12px; text-align: center; }
+.items-scroll .item-group > .kicker { position: sticky; top: 0; z-index: 1; background: var(--panel, #fff); padding: 6px 0 4px; margin: 0; }
+.rooms-scroll { max-height: 380px; }
