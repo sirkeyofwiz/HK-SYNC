@@ -1551,3 +1551,11 @@ button.chart-bar { border: 0; padding: 0; cursor: pointer; }
 .remarks-scroll { max-height: 520px; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; scrollbar-width: thin; }
 .remarks-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
 .remarks-scroll + .perf-count { display: block; margin-top: 8px; }
+
+/* Report forms: remove one room (or trolley, pantry, tool, housekeeper) */
+.entry-title .entry-remove { margin-left: 10px; color: var(--red); font-size: 13px; white-space: nowrap; }
+.entry-title h3 + .entry-remove { margin-left: auto; }
+@media (max-width: 560px) {
+  .entry-title:has(.entry-remove) { flex-wrap: wrap; row-gap: 8px; }
+  .entry-title .entry-remove { margin-left: auto; }
+}
