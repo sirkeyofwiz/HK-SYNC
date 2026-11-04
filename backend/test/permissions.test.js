@@ -89,6 +89,16 @@ test('every supervisor sees every shift handover, drivers do not', async () => {
   assert.equal((await server.call('GET', `/api/reports/${id}`, { token: driver.token })).status, 404);
 });
 
+test('late checkout rooms are kept on the handover and in the alert to the next supervisor', async () => {
+  const handover = { type: 'handover', date: hotelDate(), data: { receivedById: supervisorB.user.id, vipRooms: '2001', lateCheckoutRooms: '305 till 14:00', notes: '' } };
+  const created = await server.call('POST', '/api/reports', { token: supervisorA.token, body: handover });
+  assert.equal(created.status, 201);
+  assert.equal(created.body.report.data.lateCheckoutRooms, '305 till 14:00');
+  const alerts = (await server.call('GET', '/api/notifications', { token: supervisorB.token })).body.notifications;
+  const alert = alerts.find((item) => item.type === 'handover' && item.link?.id === created.body.report.id);
+  assert.match(alert.body, /VIP: 2001 · Late checkout: 305 till 14:00/);
+});
+
 test("staff cannot sign, change or delete someone else's report", async () => {
   const created = await server.call('POST', '/api/reports', { token: supervisorA.token, body: qualityReport() });
   const id = created.body.report.id;

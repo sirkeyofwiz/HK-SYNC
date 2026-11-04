@@ -1158,7 +1158,7 @@ function announceReport(report, submitter, actorId, before = null) {
     }
   }
   if (report.type === 'handover' && data.receivedById && data.receivedById !== before?.receivedById) {
-    const next = [['Emergency', data.emergencyRoomsReady], ['VIP', data.vipRooms], ['Repeaters', data.repeaterRooms], ['Rooms to check', data.roomsToCheck], ['Turn-down', data.turndownRooms]].filter(([, value]) => String(value || '').trim()).map(([name, value]) => `${name}: ${String(value).trim()}`).join(' · ');
+    const next = [['Emergency', data.emergencyRoomsReady], ['VIP', data.vipRooms], ['Repeaters', data.repeaterRooms], ['Late checkout', data.lateCheckoutRooms], ['Rooms to check', data.roomsToCheck], ['Turn-down', data.turndownRooms]].filter(([, value]) => String(value || '').trim()).map(([name, value]) => `${name}: ${String(value).trim()}`).join(' · ');
     notify(data.receivedById, { type: 'handover', fromUserId: actorId, title: 'Shift handover for you', body: `From ${submitter.name}${next ? ` · ${next}` : ''}`, link: { page: 'report', id: report.id } });
   }
   if (report.type === 'inspection_rate' && data.supervisorId && data.supervisorId !== before?.supervisorId) {
