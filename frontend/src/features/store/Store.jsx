@@ -325,7 +325,7 @@ export function Store({ request, saveExport }) {
   if (!config) return <Empty text="Loading the store…" />;
   const picked = tab === 'season' ? book : book === 'all' ? 'amenities' : book;
   return <div className="store">
-    <div className="heading"><div><p className="kicker">HOUSEKEEPING STORE</p><h2>{tab === 'occupancy' ? 'Occupancy & budgets' : tab === 'import' ? 'Import from Excel' : config.books[picked]?.name || 'All store books'}</h2></div></div>
+    <div className="heading"><div><h2>{tab === 'occupancy' ? 'Occupancy & budgets' : tab === 'import' ? 'Import from Excel' : config.books[picked]?.name || 'All store books'}</h2></div></div>
     <div className="segmented store-tabs" role="tablist" aria-label="Store">{tabs.map(([key, label]) => <button type="button" role="tab" key={key} aria-selected={tab === key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{label}</button>)}</div>
     {!['occupancy', 'import'].includes(tab) && <BookPicker books={config.books} book={picked} setBook={setBook} all={tab === 'season'} />}
     {tab === 'record' && <RecordTab key={picked} config={config} book={picked} request={request} flash={flash} />}
