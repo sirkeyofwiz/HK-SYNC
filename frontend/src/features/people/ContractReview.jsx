@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Empty } from '../../components/ui';
 import { Icon } from '../../components/icons';
-import { deadlineLabel } from '../../lib/format';
+import { deadlineLabel, plural } from '../../lib/format';
 
 // ---------- Contract review (managers) ----------
 // One financial year's evidence per housekeeper and supervisor, the band the hotel's rules suggest, and the manager's
@@ -79,11 +79,24 @@ function DecisionBox({ row, year, canDecide, request, onSaved }) {
 
 function Fact({ label, value, note }) { return <div className="review-fact"><small>{label}</small><b>{value}</b>{note && <small>{note}</small>}</div>; }
 
-function ReviewCard({ row, year, canDecide, request, open, onDecision }) {
+// One row per person: name, band, the main number and the decision. Tapping the row opens the evidence and the decision
+// form below it; one person is open at a time, so the list stays short.
+function ReviewCard({ row, year, canDecide, request, open, onDecision, expanded, toggle }) {
   const [tone, label] = REVIEW_BANDS[row.band];
   const hk = row.kind === 'hk';
-  return <article className={`panel review-card band-${row.band}`}>
-    <div className="review-card-head"><button type="button" className="link-button" onClick={open}>{row.name}</button><span className={`tag ${tone}`}>{label}</span></div>
+  const main = hk ? (row.average === null ? '—' : `${row.average}/10`) : (row.average === null ? '—' : `${row.average}/60`);
+  const evidence = hk ? `${plural(row.inspections, 'inspection')}` : `${plural(row.rooms, 'room')} · ${plural(row.sessions, 'session')}`;
+  const decided = row.decision?.decision && row.decision.decision !== 'undecided';
+  return <article className={`review-card band-${row.band} ${expanded ? 'open' : ''}`}>
+    <button type="button" className="review-row" aria-expanded={expanded} onClick={toggle}>
+      <span className="review-row-name"><b>{row.name}</b><small>{evidence}</small></span>
+      <span className={`tag ${tone}`}>{label}</span>
+      <span className="review-row-main"><b>{main}</b><small>{hk ? 'year average' : 'room average'}</small></span>
+      <span className={`review-row-decision ${decided ? 'decided' : ''}`}>{DECISION_LABEL[row.decision?.decision || 'undecided']}</span>
+      <span className="review-row-chevron" aria-hidden="true">›</span>
+    </button>
+    {expanded && <div className="review-body">
+    <button type="button" className="text review-profile" onClick={open}>View profile →</button>
     <ul className="review-reasons">{row.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
     <div className="review-facts">{hk ? <>
       <Fact label="Year average" value={row.average === null ? '—' : `${row.average}/10`} note={row.trend ? TRENDS[row.trend.direction] : null} />
@@ -99,6 +112,7 @@ function ReviewCard({ row, year, canDecide, request, open, onDecision }) {
     </>}</div>
     {hk && row.remarks.length > 0 && <details className="review-remarks"><summary>Latest inspection remarks ({row.remarks.length})</summary><ul>{row.remarks.map((remark) => <li key={`${remark.reportId}-${remark.text}`}><small>{deadlineLabel(remark.date)} · {remark.score}/10</small> “{remark.text}”</li>)}</ul></details>}
     <DecisionBox row={row} year={year} canDecide={canDecide} request={request} onSaved={onDecision} />
+    </div>}
   </article>;
 }
 
@@ -109,7 +123,8 @@ export function ContractReview({ request, openProfile, openSupervisor, saveExpor
   const [kind, setKind] = useState('hk');
   const [band, setBand] = useState('all');
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const load = () => request(`/contract-review${year ? `?year=${year}` : ''}`).then((result) => { setData(result); setError(''); }).catch((problem) => setError(problem.message));
+  const [openKey, setOpenKey] = useState(null);
+  const load =() => request(`/contract-review${year ? `?year=${year}` : ''}`).then((result) => { setData(result); setError(''); }).catch((problem) => setError(problem.message));
   useEffect(() => { setData(null); load(); }, [year]);
   if (error) return <section className="panel review-closed"><p className="kicker">CONTRACT REVIEW</p><h2>Not available</h2><p className="muted">{error}</p></section>;
   if (!data) return <Empty text="Loading contract reviews…" />;
@@ -135,7 +150,7 @@ export function ContractReview({ request, openProfile, openSupervisor, saveExpor
     {settingsOpen && data.canDecide && <ReviewSettings data={data} request={request} onSaved={() => load()} />}
     <div className="review-filters"><div className="segmented" role="group" aria-label="Who">{[['hk', `Housekeepers (${data.housekeepers.length})`], ['supervisor', `Supervisors (${data.supervisors.length})`]].map(([key, label]) => <button type="button" key={key} className={kind === key ? 'active' : ''} aria-pressed={kind === key} onClick={() => { setKind(key); setBand('all'); }}>{label}</button>)}</div>
       <div className="review-band-filter" role="group" aria-label="Band"><button type="button" className={band === 'all' ? 'active' : ''} aria-pressed={band === 'all'} onClick={() => setBand('all')}>All {rows.length}</button>{Object.entries(REVIEW_BANDS).map(([key, [tone, label]]) => <button type="button" key={key} className={`tag ${tone} ${band === key ? 'active' : ''}`} aria-pressed={band === key} onClick={() => setBand(key)}>{label} {count(rows, key)}</button>)}</div></div>
-    {shown.length ? <div className="review-list">{shown.map((row) => <ReviewCard key={row.key} row={row} year={data.period.startYear} canDecide={data.canDecide} request={request} open={() => (row.kind === 'hk' ? openProfile(row.name) : openSupervisor(row.key, row.name))} onDecision={(decision) => updateDecision(row, decision)} />)}</div>
+    {shown.length ? <div className="review-list">{shown.map((row) => <ReviewCard key={row.key} row={row} year={data.period.startYear} canDecide={data.canDecide} request={request} open={() => (row.kind === 'hk' ? openProfile(row.name) : openSupervisor(row.key, row.name))} onDecision={(decision) => updateDecision(row, decision)} expanded={openKey === `${row.kind}:${row.key}`} toggle={() => setOpenKey(openKey === `${row.kind}:${row.key}` ? null : `${row.kind}:${row.key}`)} />)}</div>
       : <Empty text={rows.length ? 'Nobody in this band.' : kind === 'hk' ? 'No housekeepers on the roster yet. Add them on Goals.' : 'No active supervisor accounts.'} />}
   </>;
 }

@@ -1720,3 +1720,31 @@ summary { color: #1d4ed8; }
 .switch-row input:checked { background: #2563eb; }
 .progress-table .name-cell { justify-content: flex-start; justify-self: stretch; text-align: left; }
 .progress-table .name-cell { flex-direction: row; align-items: baseline; }
+
+/* Contract review: one short row per person in a single list; tap a row to open the evidence and the decision */
+.review-list { display: block; gap: 0; background: #fff; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.review-card { display: block; border-left: 4px solid var(--line); border-top: 1px solid var(--line); }
+.review-card:first-child { border-top: 0; }
+.review-row { display: grid; grid-template-columns: minmax(0, 1.6fr) auto minmax(90px, .6fr) minmax(130px, .8fr) 20px; align-items: center; gap: 14px; width: 100%; padding: 13px 18px; background: none; text-align: left; color: var(--ink); }
+.review-row:hover { background: #f7f9fc; }
+.review-row-name { display: grid; min-width: 0; }
+.review-row-name b { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review-row-name small, .review-row-main small { color: var(--slate); font-size: 11px; }
+.review-row .tag { font-size: 11px; padding: 4px 9px; justify-self: start; }
+.review-row-main { display: grid; }
+.review-row-main b { font-size: 15px; }
+.review-row-decision { font-size: 12px; color: var(--slate); }
+.review-row-decision.decided { color: #1d4ed8; font-weight: 700; }
+.review-row-chevron { font-size: 22px; color: var(--slate); transition: transform .15s; justify-self: end; line-height: 1; }
+.review-card.open .review-row-chevron { transform: rotate(90deg); }
+.review-card.open .review-row { background: #f7f9fc; }
+.review-body { display: grid; gap: 14px; padding: 6px 18px 20px; background: #fbfcfe; border-top: 1px solid var(--line); }
+.review-profile { justify-self: start; font-size: 13px; padding-top: 10px; }
+@media (max-width: 700px) {
+  .review-row { grid-template-columns: minmax(0, 1fr) auto 18px; row-gap: 6px; padding: 12px 14px; }
+  .review-row .tag { grid-column: 2; grid-row: 1; }
+  .review-row-main { grid-column: 1; grid-row: 2; grid-auto-flow: column; justify-content: start; align-items: baseline; gap: 6px; }
+  .review-row-decision { grid-column: 2; grid-row: 2; justify-self: end; }
+  .review-row-chevron { grid-column: 3; grid-row: 1 / span 2; }
+  .review-body { padding: 6px 14px 16px; }
+}
