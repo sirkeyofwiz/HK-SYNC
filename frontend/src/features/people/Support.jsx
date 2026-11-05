@@ -20,9 +20,9 @@ export const hkProblems = (profile) => [
   ...recurring((profile.remarks || []).map((remark) => remark.text))
 ];
 export const supervisorProblems = (profile) => [
-  ...(profile.rooms && profile.roomAverage !== null && profile.roomAverage < IRP_PASS ? [`Room average ${profile.roomAverage}/50 (below ${IRP_PASS})`] : []),
+  ...(profile.rooms && profile.roomAverage !== null && profile.roomAverage < IRP_PASS ? [`Room average ${profile.roomAverage}/60 (below ${IRP_PASS})`] : []),
   ...profile.weaknesses.map((item) => `${item.label} ${item.average}/10 (team ${item.team})`),
-  ...(profile.flagged ? [`${plural(profile.flagged, 'room')} under ${IRP_PASS}/50`] : []),
+  ...(profile.flagged ? [`${plural(profile.flagged, 'room')} under the pass mark (${IRP_PASS}/60)`] : []),
   ...recurring((profile.recent || []).map((room) => room.remarks))
 ];
 

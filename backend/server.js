@@ -247,11 +247,11 @@ const HK_POINT_TYPES = ['quality', 'neglected', 'trolley_pantry'];
 const sum = (values) => values.reduce((total, value) => total + value, 0);
 const nameKey = (name) => String(name || '').trim().toLowerCase();
 
-// Supervisor points: every room total (out of 50) from Inspection Rate Program reports about them, plus a cumulative history.
-// Supervisor points toward 500: only rooms that pass (30/50 or more, see FLAG_THRESHOLDS) add their total; a failed room
-// adds nothing. The room average still counts every room, so it shows how the supervisor is really doing.
+// Supervisor points: every room total from Inspection Rate Program reports about them, plus a cumulative history.
+// Supervisor points toward 500: only rooms that pass (36/60, or 30/50 for older five-item rooms) add their total; a failed
+// room adds nothing. The room average (on the 60 scale) still counts every room, so it shows how they are really doing.
 function supervisorPoints(period) {
-  const passMark = FLAG_THRESHOLDS.inspection_rate * INSPECTION_ITEMS.length;
+  const passMark = IRP_PASS_MARK;
   const reports = state.reports.filter((report) => report.type === 'inspection_rate' && inGoalPeriod(report, period))
     .sort((a, b) => String(a.date).localeCompare(String(b.date)));
   return state.users.filter((user) => user.role === 'supervisor' && user.active !== false).map((supervisor) => {
@@ -261,12 +261,12 @@ function supervisorPoints(period) {
     let allTotals = 0;
     const history = [];
     for (const report of reports.filter((entry) => entry.data?.supervisorId === supervisor.id)) {
-      const totals = scoredEntries(report).map((entry) => scoreValues(entry)).filter((values) => values.length).map(sum);
-      const passed = totals.filter((total) => total >= passMark);
-      points += sum(passed);
+      const scored = scoredEntries(report).filter((entry) => scoreValues(entry).length);
+      const passed = scored.filter((entry) => sum(scoreValues(entry)) >= roomPassMark(entry));
+      points += sum(passed.map((entry) => sum(scoreValues(entry))));
       passedRooms += passed.length;
-      allTotals += sum(totals);
-      rooms += totals.length;
+      allTotals += sum(scored.map(roomOn60));
+      rooms += scored.length;
       history.push({ date: report.date, points });
     }
     return { id: supervisor.id, name: supervisor.name, points, sessions: history.length, rooms, passedRooms, passMark, roomAverage: rooms ? Number((allTotals / rooms).toFixed(1)) : null, lastInspected: history.at(-1)?.date || null, history };
@@ -577,7 +577,7 @@ function scoreValues(entry) {
   return Object.values(entry.scores).filter((score) => score !== '' && score !== null).map(Number).filter((score) => Number.isFinite(score));
 }
 
-// Inspection Rate Program: a room passes at 30/50 or more (an average of 6 per item, lowered from 40/50 on 2026-11-01);
+// Inspection Rate Program: a room passes at an average of 6 per item, 36/60 (30/50 for older five-item rooms; lowered from 40/50 on 2026-11-01);
 // rooms below that are flagged and must be re-cleaned before check-in. The app uses the same mark (IRP_PASS).
 const FLAG_THRESHOLDS = { inspection_rate: 6 };
 
@@ -1105,7 +1105,7 @@ function handoverReceiver(data, submitterId) {
 
 // Type-specific checks and tidying for a new or edited report. Returns a message for the person, or null when it is fine.
 // `submitter` is whoever filed the report (an edit by a manager keeps the original submitter).
-function prepareReportData(type, data, submitter) {
+function prepareReportData(type, data, submitter, { fiveItemReport = false } = {}) {
   // Mattress rotation, upholstery and water drainage: see roomcare.js. A housekeeper's name takes the roster's spelling.
   const careProblem = prepareRoomCare(type, data, (name) => currentRoster().map((row) => row.name).find((rosterName) => nameKey(rosterName) === nameKey(name)) || null);
   if (careProblem) return careProblem;
@@ -1116,12 +1116,14 @@ function prepareReportData(type, data, submitter) {
     const evaluated = state.users.find((user) => user.id === data.supervisorId && user.role === 'supervisor' && user.active !== false);
     if (!evaluated) return 'Choose the supervisor being evaluated.';
     data.supervisorName = evaluated.name;
-    // Every room is out of 50, so all five items must be scored: an empty one used to count as 0 and was hidden on the report.
+    // Every room is out of 60, so all six items must be scored: an empty one used to count as 0 and was hidden on the report.
+    // A report filed before Entrance Area existed can be edited without it: those rooms stay out of 50 with five items.
     const rooms = Array.isArray(data.entries) ? data.entries : [];
     if (!rooms.length) return 'Add at least one room.';
     for (const [index, room] of rooms.entries()) {
-      const missing = INSPECTION_ITEMS.filter((item) => [undefined, null, ''].includes(room?.scores?.[item]));
-      if (missing.length) return `${room?.room ? `Room ${room.room}` : `Room ${index + 1}`}: score ${missing.join(', ')}. All five items are needed.`;
+      const needed = fiveItemReport ? roomItems(room) : INSPECTION_ITEMS;
+      const missing = needed.filter((item) => [undefined, null, ''].includes(room?.scores?.[item]));
+      if (missing.length) return `${room?.room ? `Room ${room.room}` : `Room ${index + 1}`}: score ${missing.join(', ')}. All ${needed.length === 6 ? 'six' : 'five'} items are needed.`;
     }
   }
   if (type === 'handover') {
@@ -1284,7 +1286,17 @@ app.get('/api/hk-profiles/:name', authMiddleware, requireManager, (req, res) => 
 // ---------- Supervisor profiles ----------
 // How managers rate each supervisor (Inspection Rate Program: five items per room out of 10, so a room is out of 50),
 // plus the supervisor's own reports and tasks. Strength/weakness rules are the same as for housekeeper profiles.
-const INSPECTION_ITEMS = ['Bathroom', 'Bedroom', 'Balcony', 'Maintenance', 'Presentation Room'];
+// Six items of 10, so a room is out of 60 and passes at 36 (an average of 6). Entrance Area was added on 2026-11-05;
+// rooms filed before then have five items, are out of 50 and pass at 30. Each room is judged on its own items, and
+// averages put every room on the 60 scale (30/50 counts as 36/60), so old and new rooms compare fairly.
+const INSPECTION_ITEMS = ['Bathroom', 'Bedroom', 'Balcony', 'Maintenance', 'Presentation Room', 'Entrance Area'];
+const IRP_SCALE = INSPECTION_ITEMS.length * 10;
+const roomItems = (entry) => (entry?.scores && Object.prototype.hasOwnProperty.call(entry.scores, 'Entrance Area') ? INSPECTION_ITEMS : INSPECTION_ITEMS.slice(0, 5));
+const roomOutOf = (entry) => roomItems(entry).length * 10;
+const roomPassMark = (entry) => FLAG_THRESHOLDS.inspection_rate * roomItems(entry).length;
+// A room's total on the 60 scale, for averages and for comparing with the pass mark (36/60).
+const roomOn60 = (entry) => (sum(scoreValues(entry)) / roomOutOf(entry)) * IRP_SCALE;
+const IRP_PASS_MARK = FLAG_THRESHOLDS.inspection_rate * INSPECTION_ITEMS.length;
 const activeSupervisors = () => state.users.filter((user) => user.role === 'supervisor' && user.active !== false);
 const periodStart = (period) => (period === 'all' ? '' : goalPeriod().start);
 
@@ -1305,7 +1317,7 @@ function buildSupervisorProfile(supervisor, period, points) {
         items.get(label).team.push(value);
         if (mine) items.get(label).mine.push(value);
       }
-      if (mine) rooms.push({ reportId: report.id, date: report.date, room: entry.room || '', area: report.data?.area || '', total: sum(values), outOf: values.length * 10, average: round1(average(values)), remarks: entry.remarks || '', inspectedBy: userName(report.submittedBy) });
+      if (mine) rooms.push({ reportId: report.id, date: report.date, room: entry.room || '', area: report.data?.area || '', total: sum(values), outOf: roomOutOf(entry), on60: roomOn60(entry), average: round1(average(values)), remarks: entry.remarks || '', inspectedBy: userName(report.submittedBy) });
     }
   }
   const itemRows = INSPECTION_ITEMS.map((label) => ({ label, average: round1(average(items.get(label).mine)), count: items.get(label).mine.length, team: round1(average(items.get(label).team)) })).filter((item) => item.count);
@@ -1334,7 +1346,7 @@ function buildSupervisorProfile(supervisor, period, points) {
     name: supervisor.name,
     points: { points: points?.points || 0, target: POINTS_TARGET.supervisor, deadline: goalPeriod().end },
     rooms: rooms.length,
-    roomAverage: rooms.length ? round1(average(rooms.map((room) => room.total))) : null,
+    roomAverage: rooms.length ? round1(average(rooms.map((room) => room.on60))) : null,
     average: round1(average(rooms.map((room) => room.average))),
     lastInspected: rooms.at(-1)?.date || null,
     strengths: rated.filter((item) => item.average >= STRENGTH_AT).sort((a, b) => b.average - a.average || b.count - a.count).slice(0, 3),
@@ -1432,13 +1444,13 @@ app.get('/api/hk-performance', authMiddleware, requireManager, (req, res) => {
 });
 
 // Overview "Supervisor performance": the same, for supervisors, from the Inspection Rate Program (managers inspecting a
-// supervisor's rooms) over the last 30 days. A room is out of 50 (five items of 10). The line is the IRP pass mark
-// (30/50, an average of 6): an average of 30/50 or more is doing well, under 30/50 needs support, so every inspected
-// supervisor is on one list. A room under the pass mark has failed.
+// supervisor's rooms) over the last 30 days. A room is out of 60 (six items of 10; older five-item rooms count on the same
+// scale). The line is the IRP pass mark (36/60, an average of 6): an average of 36/60 or more is doing well, under it
+// needs support, so every inspected supervisor is on one list. A room under its pass mark has failed.
 // Supervisors with no inspected room in the period are listed, so a manager can go and inspect them.
 function supervisorPerformance(since, until = dateInAppZone(0)) {
   const supervisors = activeSupervisors();
-  const passAt = FLAG_THRESHOLDS.inspection_rate * INSPECTION_ITEMS.length;
+  const passAt = IRP_PASS_MARK;
   const people = new Map();
   for (const report of state.reports) {
     if (report.voided || report.type !== 'inspection_rate' || String(report.date) < since || String(report.date) > until) continue;
@@ -1448,10 +1460,10 @@ function supervisorPerformance(since, until = dateInAppZone(0)) {
       const values = scoreValues(entry);
       if (!values.length) continue;
       const person = people.get(supervisor.id) || { id: supervisor.id, name: supervisor.name, rooms: 0, total: 0, failed: 0, lastInspected: '', items: new Map() };
-      // The room's total out of 50, as on Goals & points: an item left unscored adds nothing.
+      // The room's total on the 60 scale, as on Goals & points: an item left unscored adds nothing.
       person.rooms += 1;
-      person.total += sum(values);
-      if (sum(values) < passAt) person.failed += 1;
+      person.total += roomOn60(entry);
+      if (sum(values) < roomPassMark(entry)) person.failed += 1;
       if (String(report.date) > person.lastInspected) person.lastInspected = String(report.date);
       for (const item of INSPECTION_ITEMS) {
         const value = itemScore(entry, item);
@@ -1540,7 +1552,8 @@ app.put('/api/reports/:id', authMiddleware, reportJson, (req, res) => {
   const problem = reportProblem(report.date, data, { checkDate: false });
   if (problem) return res.status(400).json({ message: problem });
   const submitter = state.users.find((user) => user.id === report.submittedBy) || editor;
-  const dataProblem = prepareReportData(report.type, data, submitter);
+  const fiveItemReport = report.type === 'inspection_rate' && !reportLines(report, 'entries').some((entry) => roomItems(entry).length === INSPECTION_ITEMS.length);
+  const dataProblem = prepareReportData(report.type, data, submitter, { fiveItemReport });
   if (dataProblem) return res.status(400).json({ message: dataProblem });
   const before = { flagged: reportSummary(report).flagged, receivedById: report.data?.receivedById, supervisorId: report.data?.supervisorId };
   storeReportPhotos(data);
@@ -2587,16 +2600,17 @@ app.get('/api/backups/download', authMiddleware, requireManager, requireOwnerMan
 //     meets standard: year average 8.0+ and no area below 7.0; improvement plan: 7.0–7.9 or an area below 7.0;
 //     below standard: under 7.0, or 1 in 4+ inspections failed (under 6); not enough evidence: fewer than 12
 //     inspections, or all by one supervisor.
-//   Supervisors (Inspection Rate Program rooms, out of 50): meets: average 40+ and 90%+ rooms pass the 30/50 mark;
-//     improvement plan: 35–39 or 75–89% pass; below: under 35 or under 75% pass; not enough: under 6 sessions or 20 rooms.
+//   Supervisors (Inspection Rate Program rooms, out of 60): meets: average 48+ and 90%+ rooms pass the 36/60 mark;
+//     improvement plan: 42–47 or 75–89% pass; below: under 42 or under 75% pass; not enough: under 6 sessions or 20 rooms.
+//     (Until Entrance Area was added rooms were out of 50 and these were 40 and 35: the same 80% and 70%.)
 const REVIEW_BANDS = {
   hk: { meetsAverage: 8, areaMinimum: 7, belowAverage: 7, failedBelow: 6, failedShare: 0.25, minInspections: 12, minSupervisors: 2 },
-  supervisor: { meetsAverage: 40, meetsPassRate: 0.9, belowAverage: 35, belowPassRate: 0.75, minSessions: 6, minRooms: 20 }
+  supervisor: { meetsAverage: 48, meetsPassRate: 0.9, belowAverage: 42, belowPassRate: 0.75, minSessions: 6, minRooms: 20 }
 };
 // Allowed range of each band setting: [min, max, whole numbers only].
 const REVIEW_BAND_LIMITS = {
   hk: { meetsAverage: [0, 10], areaMinimum: [0, 10], belowAverage: [0, 10], failedBelow: [0, 10], failedShare: [0, 1], minInspections: [0, 500, true], minSupervisors: [1, 50, true] },
-  supervisor: { meetsAverage: [0, 50], meetsPassRate: [0, 1], belowAverage: [0, 50], belowPassRate: [0, 1], minSessions: [0, 500, true], minRooms: [0, 5000, true] }
+  supervisor: { meetsAverage: [0, 60], meetsPassRate: [0, 1], belowAverage: [0, 60], belowPassRate: [0, 1], minSessions: [0, 500, true], minRooms: [0, 5000, true] }
 };
 const REVIEW_DECISIONS = ['undecided', 'renew', 'renew_with_plan', 'do_not_renew'];
 const HK_REVIEW_AREAS = ['cleaning', 'hygiene', 'trolleyPantry', 'guestInteraction'];
@@ -2609,7 +2623,13 @@ function saveReviewSettings(changes) {
   saveRow('settings', next);
   return next;
 }
-const reviewBands = () => { const saved = reviewSettings().bands || {}; return { hk: { ...REVIEW_BANDS.hk, ...saved.hk }, supervisor: { ...REVIEW_BANDS.supervisor, ...saved.supervisor } }; };
+// Supervisor averages saved before rooms went to 60 (no scale noted) were out of 50, so they are read ×1.2.
+const reviewBands = () => {
+  const saved = reviewSettings().bands || {};
+  const supervisor = { ...saved.supervisor };
+  if (saved.supervisor && saved.supervisorScale !== IRP_SCALE) for (const field of ['meetsAverage', 'belowAverage']) if (supervisor[field] !== undefined) supervisor[field] = round1(supervisor[field] * IRP_SCALE / 50);
+  return { hk: { ...REVIEW_BANDS.hk, ...saved.hk }, supervisor: { ...REVIEW_BANDS.supervisor, ...supervisor } };
+};
 const reviewKey = (year, kind, key) => `${year}:${kind}:${kind === 'hk' ? nameKey(key) : key}`;
 
 function requireReviewReader(req, res, next) {
@@ -2686,14 +2706,14 @@ function housekeeperReview(period, bands) {
 }
 
 function supervisorReview(period, bands) {
-  const passMark = FLAG_THRESHOLDS.inspection_rate * INSPECTION_ITEMS.length;
+  const passMark = IRP_PASS_MARK;
   const points = new Map(supervisorPoints(period).map((row) => [row.id, row.points]));
   const inPeriod = state.reports.filter((report) => inGoalPeriod(report, period));
   return state.users.filter((user) => user.role === 'supervisor' && user.active !== false).map((supervisor) => {
     const sessions = inPeriod.filter((report) => report.type === 'inspection_rate' && report.data?.supervisorId === supervisor.id);
-    const timeline = sessions.flatMap((report) => scoredEntries(report).map(scoreValues).filter((values) => values.length).map((values) => ({ date: report.date, score: sum(values) })));
+    const timeline = sessions.flatMap((report) => scoredEntries(report).filter((entry) => scoreValues(entry).length).map((entry) => ({ date: report.date, score: round1(roomOn60(entry)), passed: sum(scoreValues(entry)) >= roomPassMark(entry) })));
     const rooms = timeline.length;
-    const passed = timeline.filter((item) => item.score >= passMark).length;
+    const passed = timeline.filter((item) => item.passed).length;
     const roomAverage = round1(average(timeline.map((item) => item.score)));
     const passRate = rooms ? passed / rooms : 0;
     const reasons = [];
@@ -2703,15 +2723,15 @@ function supervisorReview(period, bands) {
       reasons.push(`${sessions.length} inspection session${sessions.length === 1 ? '' : 's'} and ${rooms} room${rooms === 1 ? '' : 's'} this year; at least ${bands.minSessions} sessions and ${bands.minRooms} rooms are needed to judge fairly.`);
     } else if (roomAverage < bands.belowAverage || passRate < bands.belowPassRate) {
       band = 'below';
-      if (roomAverage < bands.belowAverage) reasons.push(`Room average ${roomAverage}/50 is below ${bands.belowAverage}/50.`);
-      if (passRate < bands.belowPassRate) reasons.push(`${pct(passRate)} of rooms passed ${passMark}/50; under ${pct(bands.belowPassRate)}.`);
+      if (roomAverage < bands.belowAverage) reasons.push(`Room average ${roomAverage}/60 is below ${bands.belowAverage}/60.`);
+      if (passRate < bands.belowPassRate) reasons.push(`${pct(passRate)} of rooms passed ${passMark}/60; under ${pct(bands.belowPassRate)}.`);
     } else if (roomAverage < bands.meetsAverage || passRate < bands.meetsPassRate) {
       band = 'plan';
-      if (roomAverage < bands.meetsAverage) reasons.push(`Room average ${roomAverage}/50; ${bands.meetsAverage}/50 meets the standard.`);
-      if (passRate < bands.meetsPassRate) reasons.push(`${pct(passRate)} of rooms passed ${passMark}/50; ${pct(bands.meetsPassRate)} meets the standard.`);
+      if (roomAverage < bands.meetsAverage) reasons.push(`Room average ${roomAverage}/60; ${bands.meetsAverage}/60 meets the standard.`);
+      if (passRate < bands.meetsPassRate) reasons.push(`${pct(passRate)} of rooms passed ${passMark}/60; ${pct(bands.meetsPassRate)} meets the standard.`);
     } else {
       band = 'meets';
-      reasons.push(`Room average ${roomAverage}/50 and ${pct(passRate)} of rooms passed ${passMark}/50.`);
+      reasons.push(`Room average ${roomAverage}/60 and ${pct(passRate)} of rooms passed ${passMark}/60.`);
     }
     // Context only, not part of the band: the app doesn't know each supervisor's shifts.
     const own = inPeriod.filter((report) => report.submittedBy === supervisor.id);
@@ -2772,7 +2792,7 @@ app.put('/api/contract-review/settings', authMiddleware, requireReviewOwner, (re
     if (bands.hk.belowAverage > bands.hk.meetsAverage || bands.supervisor.belowAverage > bands.supervisor.meetsAverage || bands.supervisor.belowPassRate > bands.supervisor.meetsPassRate) {
       return res.status(400).json({ message: '"Below standard" must be lower than "meets standard".' });
     }
-    changes.bands = bands;
+    changes.bands = { ...bands, supervisorScale: IRP_SCALE };
   }
   const saved = saveReviewSettings(changes);
   return res.json({ shareWithAssistants: Boolean(saved.shareWithAssistants), bands: reviewBands() });

@@ -13,8 +13,8 @@ let review;
 
 // A Quality Checklist with one line per score in `scores`, all for housekeeper `hkName`.
 const quality = (hkName, lines) => ({ type: 'quality', date: hotelDate(), data: { block: 'A', entries: lines.map(([bed, shower], index) => ({ room: String(100 + index), hkName, scores: { 'Bed / phone': bed, Shower: shower }, remarks: bed < 6 ? 'Dust under the bed' : '' })) } });
-// An Inspection Rate Program session about a supervisor: `rooms` rooms, each item scored `item` (5 items, out of 50).
-const inspection = (supervisorId, rooms, item) => ({ type: 'inspection_rate', date: hotelDate(), data: { area: 'North', supervisorId, entries: Array.from({ length: rooms }, (_, index) => ({ room: String(200 + index), scores: { Bathroom: item, Bedroom: item, Balcony: item, Maintenance: item, 'Presentation Room': item }, remarks: '' })) } });
+// An Inspection Rate Program session about a supervisor: `rooms` rooms, each item scored `item` (6 items, out of 60).
+const inspection = (supervisorId, rooms, item) => ({ type: 'inspection_rate', date: hotelDate(), data: { area: 'North', supervisorId, entries: Array.from({ length: rooms }, (_, index) => ({ room: String(200 + index), scores: { Bathroom: item, Bedroom: item, Balcony: item, Maintenance: item, 'Presentation Room': item, 'Entrance Area': item }, remarks: '' })) } });
 const send = async (token, body) => { const { status, body: answer } = await server.call('POST', '/api/reports', { token, body }); assert.equal(status, 201, JSON.stringify(answer)); };
 const person = (list, name) => list.find((row) => row.name === name);
 
@@ -36,7 +36,7 @@ before(async () => {
   }
   await send(supA.token, quality('Rehema Few', [[9, 9], [9, 9], [9, 9]]));
   await send(supA.token, quality('Salma One Inspector', [...six([9, 9]), ...six([9, 9])]));
-  // Supervisors: A strong (45/50), B average (36/50), C only two sessions.
+  // Supervisors: A strong (54/60), B average (43.2/60), C only two sessions.
   for (let session = 0; session < 6; session += 1) {
     await send(manager, inspection(supA.user.id, 4, 9));
     await send(manager, inspection(supB.user.id, 4, 7.2));
@@ -89,12 +89,21 @@ test('supervisors: meets standard, improvement plan, not enough evidence', () =>
   assert.equal(asha.band, 'meets');
   assert.equal(asha.sessions, 6);
   assert.equal(asha.rooms, 24);
-  assert.equal(asha.average, 45);
+  assert.equal(asha.average, 54);
   assert.equal(asha.passRate, 1);
   const baraka = person(review.supervisors, 'Supervisor Baraka');
-  assert.equal(baraka.band, 'plan', 'average 36/50, every room passes 30/50');
+  assert.equal(baraka.band, 'plan', 'average 43.2/60, every room passes 36/60');
   assert.equal(person(review.supervisors, 'Supervisor Chausiku').band, 'not_enough');
   assert.ok(Number.isInteger(asha.reportsFiled) && asha.reportsFiled >= 6, 'context: reports the supervisor filed');
+});
+
+test('supervisor standards are out of 60: 48 meets, under 42 is below', async () => {
+  assert.deepEqual([review.defaults.supervisor.meetsAverage, review.defaults.supervisor.belowAverage], [48, 42]);
+  const saved = await server.call('PUT', '/api/contract-review/settings', { token: manager, body: { bands: { supervisor: { meetsAverage: 50 } } } });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.bands.supervisor.meetsAverage, 50, 'saved now: already on the 60 scale');
+  assert.equal((await server.call('PUT', '/api/contract-review/settings', { token: manager, body: { bands: { supervisor: { meetsAverage: 61 } } } })).status, 400);
+  await server.call('PUT', '/api/contract-review/settings', { token: manager, body: { bands: { supervisor: { meetsAverage: 48 } } } });
 });
 
 test('the manager records a decision; serious ones need a reason', async () => {

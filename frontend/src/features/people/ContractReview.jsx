@@ -23,9 +23,9 @@ const BAND_FIELDS = [
   ['hk', 'failedShare', 'Below standard: failed inspections at least', '%'],
   ['hk', 'minInspections', 'Enough evidence: inspections at least', ''],
   ['hk', 'minSupervisors', 'Enough evidence: different supervisors at least', ''],
-  ['supervisor', 'meetsAverage', 'Meets standard: room average at least', '/50'],
+  ['supervisor', 'meetsAverage', 'Meets standard: room average at least', '/60'],
   ['supervisor', 'meetsPassRate', '…and rooms passing at least', '%'],
-  ['supervisor', 'belowAverage', 'Below standard: room average under', '/50'],
+  ['supervisor', 'belowAverage', 'Below standard: room average under', '/60'],
   ['supervisor', 'belowPassRate', 'Below standard: rooms passing under', '%'],
   ['supervisor', 'minSessions', 'Enough evidence: inspection sessions at least', ''],
   ['supervisor', 'minRooms', 'Enough evidence: rooms at least', '']
@@ -91,8 +91,8 @@ function ReviewCard({ row, year, canDecide, request, open, onDecision }) {
       <Fact label="Failed" value={row.failed} note={row.inspections ? percent(row.failedShare) : null} />
       {AREAS.filter(([key]) => row.areas[key].count).map(([key, name]) => <Fact key={key} label={name} value={`${row.areas[key].average}/10`} note={`${row.areas[key].count} scores`} />)}
     </> : <>
-      <Fact label="Room average" value={row.average === null ? '—' : `${row.average}/50`} note={row.trend ? TRENDS[row.trend.direction] : null} />
-      <Fact label={`Passed ${row.passMark}/50`} value={row.rooms ? percent(row.passRate) : '—'} note={`${row.passed} of ${row.rooms} rooms`} />
+      <Fact label="Room average" value={row.average === null ? '—' : `${row.average}/60`} note={row.trend ? TRENDS[row.trend.direction] : null} />
+      <Fact label={`Passed ${row.passMark}/60`} value={row.rooms ? percent(row.passRate) : '—'} note={`${row.passed} of ${row.rooms} rooms`} />
       <Fact label="Sessions" value={row.sessions} />
       <Fact label="Points" value={`${row.points}/${row.pointsTarget}`} note="context" />
       <Fact label="Reports filed" value={row.reportsFiled} note={`${row.handovers} handovers · context`} />
@@ -122,7 +122,7 @@ export function ContractReview({ request, openProfile, openSupervisor, saveExpor
     const decisionCells = (row) => [DECISION_LABEL[row.decision?.decision || 'undecided'], row.decision?.reason || '', row.decision ? `${row.decision.byName}, ${when(row.decision.at)}` : ''];
     const hkRows = [['Housekeeper', 'Suggested band', 'Why', 'Year average /10', 'Inspections', 'Supervisors', 'Failed', ...AREAS.map(([, name]) => `${name} /10`), 'Trend', 'Decision', 'Reason', 'Decided by'],
       ...data.housekeepers.map((row) => [row.name, REVIEW_BANDS[row.band][1], row.reasons.join(' '), row.average ?? '', row.inspections, row.inspectors, row.failed, ...AREAS.map(([key]) => row.areas[key].average ?? ''), row.trend ? TRENDS[row.trend.direction] : '', ...decisionCells(row)])];
-    const supRows = [['Supervisor', 'Suggested band', 'Why', 'Room average /50', 'Rooms passed', 'Rooms', 'Sessions', 'Points', 'Reports filed', 'Handovers', 'Trend', 'Decision', 'Reason', 'Decided by'],
+    const supRows = [['Supervisor', 'Suggested band', 'Why', 'Room average /60', 'Rooms passed', 'Rooms', 'Sessions', 'Points', 'Reports filed', 'Handovers', 'Trend', 'Decision', 'Reason', 'Decided by'],
       ...data.supervisors.map((row) => [row.name, REVIEW_BANDS[row.band][1], row.reasons.join(' '), row.average ?? '', row.passed, row.rooms, row.sessions, row.points, row.reportsFiled, row.handovers, row.trend ? TRENDS[row.trend.direction] : '', ...decisionCells(row)])];
     const workbook = utils.book_new();
     utils.book_append_sheet(workbook, utils.aoa_to_sheet(hkRows), 'Housekeepers');
