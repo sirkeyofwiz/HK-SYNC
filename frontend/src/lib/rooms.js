@@ -8,7 +8,7 @@ export const BLOCKS = [
   ...[21, 22, 23, 24, 25].map((block) => ({ name: `Block ${block}`, rooms: range(block, 10) }))
 ];
 export const ROOMS = BLOCKS.flatMap((block) => block.rooms);
-export const UPHOLSTERY_ITEMS = ['Armchair', 'Luggage rack', 'Carpet', 'Sofa', 'Pouf', 'Decoration pillow', 'Bed runner'];
+export const UPHOLSTERY_ITEMS = ['Armchair', 'Luggage rack', 'Carpet', 'Sofa', 'Pouf', 'Decoration pillow', 'Bed runner', 'New rooms TV table chair'];
 export const ROOM_CARE_TYPES = ['mattress_rotation', 'upholstery', 'drainage'];
 // How often each is due, as the Room care tab says it.
 export const ROOM_CARE_EVERY = { mattress_rotation: 'every 4 months', upholstery: 'every month', drainage: 'every month' };

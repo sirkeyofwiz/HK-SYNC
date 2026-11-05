@@ -32,9 +32,9 @@ test('mattress rotation: a real room and the housekeeper are needed; the name ta
 
 test('upholstery: at least one item ticked, only known items kept', async () => {
   assert.match((await submit('upholstery', [{ room: '205', items: [] }])).body.message, /tick what was cleaned/);
-  const saved = await submit('upholstery', [{ room: '205', items: ['Bed runner', 'Sofa', 'Armchair', 'Television'] }]);
+  const saved = await submit('upholstery', [{ room: '205', items: ['New rooms TV table chair', 'Bed runner', 'Sofa', 'Armchair', 'Television'] }]);
   assert.equal(saved.status, 201);
-  assert.deepEqual(saved.body.report.data.entries[0].items, ['Armchair', 'Sofa', 'Bed runner']);
+  assert.deepEqual(saved.body.report.data.entries[0].items, ['Armchair', 'Sofa', 'Bed runner', 'New rooms TV table chair']);
 });
 
 test('drainage: only marked blocks are kept, and an issue needs a remark and flags the report', async () => {

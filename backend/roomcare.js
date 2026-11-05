@@ -16,7 +16,7 @@ export const BLOCKS = [
   ...[21, 22, 23, 24, 25].map((block) => ({ name: `Block ${block}`, rooms: range(block, 10) }))
 ];
 export const ROOMS = BLOCKS.flatMap((block) => block.rooms);
-export const UPHOLSTERY_ITEMS = ['Armchair', 'Luggage rack', 'Carpet', 'Sofa', 'Pouf', 'Decoration pillow', 'Bed runner'];
+export const UPHOLSTERY_ITEMS = ['Armchair', 'Luggage rack', 'Carpet', 'Sofa', 'Pouf', 'Decoration pillow', 'Bed runner', 'New rooms TV table chair'];
 export const DRAINAGE_STATUSES = ['Done', 'Issue'];
 // How long until it is due again, in months.
 export const ROOM_CARE = {
