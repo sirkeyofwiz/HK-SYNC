@@ -1384,12 +1384,6 @@ select.hk-select:invalid { color: var(--slate); }
 .drainage-steps ol { margin: 6px 0 8px; padding-left: 20px; }
 .drainage-steps li { margin: 2px 0; }
 .drainage-blocks { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); margin-top: 12px; }
-.drainage-block { display: grid; gap: 8px; padding: 10px 12px; border-radius: 8px; background: #fff; border: 1px solid var(--line, #e5e7eb); }
-.drainage-block > div:first-child { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-.drainage-block small { color: var(--slate); font-size: 12px; }
-.drainage-block.done { border-color: #9fd3b8; background: #f3fbf6; }
-.drainage-block.bad { border-color: #f1b3ad; background: #fdf3f2; }
-.drainage-count { margin-top: 10px; }
 .care-items { display: flex; flex-wrap: wrap; gap: 8px; border: 0; padding: 0; margin: 8px 0; }
 .care-items legend { font-size: 13px; margin-bottom: 6px; color: var(--slate); }
 .care-item { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line, #e5e7eb); cursor: pointer; font-size: 14px; }
@@ -1415,11 +1409,6 @@ select.hk-select:invalid { color: var(--slate); }
 .care-room small { font-size: 11px; color: var(--slate); }
 .care-room:disabled { cursor: default; opacity: 1; }
 .care-room.remark { box-shadow: inset 0 -3px 0 #e0a100; }
-.drainage-sheet .table-head, .drainage-sheet .table-row { grid-template-columns: 1.2fr repeat(4, 1fr) 1.2fr; }
-.drainage-sheet .table-row > span:first-child { display: grid; }
-.drainage-sheet small { color: var(--slate); font-size: 12px; }
-.drainage-week { display: flex; flex-wrap: wrap; gap: 4px; }
-.drainage-week .badge { border: 0; cursor: pointer; }
 @media (max-width: 640px) { .care-block { grid-template-columns: 1fr; gap: 4px; } .care-block > b { padding-top: 0; } }
 .entry-card .care-items label.care-item { flex-direction: row; align-items: center; gap: 6px; font-size: 14px; font-weight: 500; color: var(--ink); }
 .drainage-blocks { align-items: start; }
@@ -1427,10 +1416,6 @@ select.hk-select:invalid { color: var(--slate); }
 /* Room care history */
 .care-count { margin: 0 0 8px; }
 .care-view { margin: 0; }
-.month-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 12px 0 10px; }
-.month-nav b { min-width: 130px; text-align: center; }
-.month-nav .secondary { padding: 6px 12px; }
-.drainage-sheet .name-link { text-align: left; }
 .care-history-table .table-head, .care-history-table .table-row { grid-template-columns: 1fr 0.9fr 1.6fr 1.6fr 1fr 0.6fr; }
 .care-history { max-width: 560px; }
 .care-timeline { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; max-height: 60vh; overflow-y: auto; }
@@ -1748,3 +1733,7 @@ summary { color: #1d4ed8; }
   .review-row-chevron { grid-column: 3; grid-row: 1 / span 2; }
   .review-body { padding: 6px 14px 16px; }
 }
+
+
+/* Water drainage form: Done or Issue beside the room */
+.drainage-status { display: flex; flex-direction: column; gap: 7px; font-size: 12px; font-weight: 700; color: var(--slate); }

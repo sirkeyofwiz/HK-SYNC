@@ -1105,9 +1105,9 @@ function handoverReceiver(data, submitterId) {
 
 // Type-specific checks and tidying for a new or edited report. Returns a message for the person, or null when it is fine.
 // `submitter` is whoever filed the report (an edit by a manager keeps the original submitter).
-function prepareReportData(type, data, submitter, { fiveItemReport = false } = {}) {
+function prepareReportData(type, data, submitter, { fiveItemReport = false, blockReport = false } = {}) {
   // Mattress rotation, upholstery and water drainage: see roomcare.js. A housekeeper's name takes the roster's spelling.
-  const careProblem = prepareRoomCare(type, data, (name) => currentRoster().map((row) => row.name).find((rosterName) => nameKey(rosterName) === nameKey(name)) || null);
+  const careProblem = prepareRoomCare(type, data, (name) => currentRoster().map((row) => row.name).find((rosterName) => nameKey(rosterName) === nameKey(name)) || null, { blockReport });
   if (careProblem) return careProblem;
   if (type === 'guest_interaction' && (!Array.isArray(data.entries) || !data.entries.length || data.entries.some((entry) => !String(entry?.hkName || '').trim()))) {
     return 'Add the housekeeper being assessed.';
@@ -1249,7 +1249,7 @@ const notes = registerNotes(app, {
   isManagerRole: (user) => isManagerRole(user)
 });
 
-// Room care trackers (mattress rotation, upholstery, water drainage): which rooms and blocks are due. See roomcare.js.
+// Room care trackers (mattress rotation, upholstery, water drainage): which rooms are due. See roomcare.js.
 registerRoomCare(app, { authMiddleware, who: (req) => currentUser(req), reports: () => state.reports, userName: (id) => userName(id), today: () => dateInAppZone(0) });
 
 // Housekeeping store (items, day sheets, occupancy, budgets, consumption reports): see store.js. Hidden until
@@ -1553,7 +1553,8 @@ app.put('/api/reports/:id', authMiddleware, reportJson, (req, res) => {
   if (problem) return res.status(400).json({ message: problem });
   const submitter = state.users.find((user) => user.id === report.submittedBy) || editor;
   const fiveItemReport = report.type === 'inspection_rate' && !reportLines(report, 'entries').some((entry) => roomItems(entry).length === INSPECTION_ITEMS.length);
-  const dataProblem = prepareReportData(report.type, data, submitter, { fiveItemReport });
+  const blockReport = report.type === 'drainage' && reportLines(report, 'entries').some((entry) => entry.block && !entry.room);
+  const dataProblem = prepareReportData(report.type, data, submitter, { fiveItemReport, blockReport });
   if (dataProblem) return res.status(400).json({ message: dataProblem });
   const before = { flagged: reportSummary(report).flagged, receivedById: report.data?.receivedById, supervisorId: report.data?.supervisorId };
   storeReportPhotos(data);
@@ -1836,7 +1837,7 @@ function lineLabel(report, list, entry, index) {
   if (list === 'trolleys') return entry.block ? `Trolley · Block ${entry.block}` : `Trolley ${index + 1}`;
   if (list === 'pantries') return entry.block ? `Pantry · Block ${entry.block}` : `Pantry ${index + 1}`;
   if (report.type === 'tools') return entry.tool || `Tool ${index + 1}`;
-  if (report.type === 'drainage') return entry.block || `Block ${index + 1}`;
+  if (report.type === 'drainage' && !entry.room) return entry.block || `Block ${index + 1}`;
   if (report.type === 'guest_interaction') return entry.hkName || `Housekeeper ${index + 1}`;
   return entry.room ? `Room ${entry.room}` : `Line ${index + 1}`;
 }

@@ -1,10 +1,11 @@
 // Room care: three logs supervisors keep, from the hotel's Excel sheets.
 // - Mattress rotation: each room's mattress turned (and by which housekeeper), every 4 months.
 // - Upholstery: armchair, luggage rack, carpet, sofa, pouf, decoration pillow and bed runner cleaned in a room, every month.
-// - Water drainage: in each block's empty rooms, all taps and the shower run for 5 minutes, every month; a plumbing
-//   problem is reported as an issue (it flags the report for the managers, like any other problem).
-// Each is an ordinary report (type mattress_rotation / upholstery / drainage) with one line per room or block. The
-// tracker (GET /api/room-care) shows, per room or block, when it was last done and whether it is due again.
+// - Water drainage: in an empty room, all taps and the shower run for 5 minutes, every month; a plumbing problem is
+//   reported as an issue (it flags the report for the managers, like any other problem).
+// Each is an ordinary report (type mattress_rotation / upholstery / drainage) with one line per room. The tracker
+// (GET /api/room-care) shows, per room, when it was last done and whether it is due again. Drainage reports filed before
+// 2026-11-06 have one line per block: they stay on their reports and in History, and don't count for any one room.
 
 // The hotel's rooms, block by block, as on the sheets: blocks 1-18 have rooms x01-x08, block 19 has 1901-1910, the
 // suites are 2001-2003, and blocks 21-25 have x01-x10. The app keeps the same list (frontend/src/lib/rooms.js).
@@ -22,7 +23,7 @@ export const DRAINAGE_STATUSES = ['Done', 'Issue'];
 export const ROOM_CARE = {
   mattress_rotation: { label: 'Mattress Rotation', months: 4, by: 'room' },
   upholstery: { label: 'Upholstery Cleaning', months: 1, by: 'room' },
-  drainage: { label: 'Water Drainage', months: 1, by: 'block' }
+  drainage: { label: 'Water Drainage', months: 1, by: 'room' }
 };
 export const ROOM_CARE_TYPES = Object.keys(ROOM_CARE);
 
@@ -30,31 +31,31 @@ const clean = (value, max) => String(value ?? '').replace(/\s+/g, ' ').trim().sl
 const isLine = (value) => value && typeof value === 'object' && !Array.isArray(value);
 
 // Checks and tidies a room care report before it is saved; returns a problem to show, or null.
-export function prepareRoomCare(type, data, isRosterName) {
+// `blockReport`: editing a drainage report filed by block, whose block lines may stay.
+export function prepareRoomCare(type, data, isRosterName, { blockReport = false } = {}) {
   if (!ROOM_CARE[type]) return null;
   const lines = (Array.isArray(data.entries) ? data.entries : []).filter(isLine);
-  if (type === 'drainage') {
-    // The form lists every block; only the blocks marked Done or Issue are kept.
-    const marked = lines.filter((line) => clean(line.status, 10));
-    if (!marked.length) return 'Mark at least one block as drained.';
-    const seen = new Set();
-    for (const line of marked) {
+  // One line per room.
+  const rooms = lines.filter((line) => clean(line.room, 10) || clean(line.block, 40) || clean(line.hkName, 80) || (Array.isArray(line.items) && line.items.length) || clean(line.remarks, 10));
+  if (!rooms.length) return 'Add at least one room.';
+  const drainageLine = (line, name) => {
+    line.remarks = clean(line.remarks, 500);
+    delete line.scores;
+    if (!DRAINAGE_STATUSES.includes(line.status)) return `${name}: choose Done or Issue.`;
+    if (line.status === 'Issue' && !line.remarks) return `${name}: say what the plumbing issue is.`;
+    return null;
+  };
+  const seen = new Set();
+  for (const [index, line] of rooms.entries()) {
+    if (type === 'drainage' && blockReport && line.block && !clean(line.room, 10)) {
       if (!BLOCKS.some((block) => block.name === line.block)) return `"${clean(line.block, 40)}" is not a block.`;
       if (seen.has(line.block)) return `${line.block} is on the report twice.`;
       seen.add(line.block);
-      if (!DRAINAGE_STATUSES.includes(line.status)) return `${line.block}: choose Done or Issue.`;
-      line.remarks = clean(line.remarks, 500);
-      if (line.status === 'Issue' && !line.remarks) return `${line.block}: say what the plumbing issue is.`;
-      delete line.scores;
+      const problem = drainageLine(line, line.block);
+      if (problem) return problem;
+      delete line.room;
+      continue;
     }
-    data.entries = marked;
-    return null;
-  }
-  // Mattress rotation and upholstery: one line per room.
-  const rooms = lines.filter((line) => clean(line.room, 10) || clean(line.hkName, 80) || (Array.isArray(line.items) && line.items.length) || clean(line.remarks, 10));
-  if (!rooms.length) return 'Add at least one room.';
-  const seen = new Set();
-  for (const [index, line] of rooms.entries()) {
     line.room = clean(line.room, 10);
     const name = line.room ? `Room ${line.room}` : `Line ${index + 1}`;
     if (!line.room) return `${name}: choose the room.`;
@@ -69,6 +70,12 @@ export function prepareRoomCare(type, data, isRosterName) {
       const rosterName = isRosterName(line.hkName);
       if (rosterName) line.hkName = rosterName;
       delete line.items;
+    } else if (type === 'drainage') {
+      const problem = drainageLine(line, name);
+      if (problem) return problem;
+      delete line.hkName;
+      delete line.items;
+      delete line.block;
     } else {
       const items = Array.isArray(line.items) ? line.items : [];
       line.items = UPHOLSTERY_ITEMS.filter((item) => items.includes(item));
@@ -92,45 +99,31 @@ export function registerRoomCare(app, { authMiddleware, who, reports, userName, 
   const canSee = (user) => ['supervisor', 'manager', 'assistant_manager'].includes(user?.role);
 
   // Every room care line ever recorded for a type, oldest first (on the same day, the later report last).
-  const records = (type) => {
-    const rule = ROOM_CARE[type];
-    return reports().filter((report) => report.type === type && !report.voided)
-      .sort((a, b) => a.date.localeCompare(b.date) || String(a.createdAt).localeCompare(String(b.createdAt)))
-      .flatMap((report) => (Array.isArray(report.data?.entries) ? report.data.entries : [])
-        .map((line) => ({ key: rule.by === 'room' ? line.room : line.block, date: report.date, reportId: report.id, by: userName(report.submittedBy), hkName: line.hkName || null, items: line.items || null, status: line.status || null, remarks: line.remarks || '' }))
-        .filter((row) => row.key));
-  };
+  const records = (type) => reports().filter((report) => report.type === type && !report.voided)
+    .sort((a, b) => a.date.localeCompare(b.date) || String(a.createdAt).localeCompare(String(b.createdAt)))
+    .flatMap((report) => (Array.isArray(report.data?.entries) ? report.data.entries : [])
+      .map((line) => ({ key: line.room || line.block, date: report.date, reportId: report.id, by: userName(report.submittedBy), hkName: line.hkName || null, items: line.items || null, status: line.status || null, remarks: line.remarks || '' }))
+      .filter((row) => row.key));
 
-  // The tracker: per room or block, the latest record and whether it is due. `month` (YYYY-MM, default this month)
-  // picks the month shown on the drainage sheet, so managers can look back at earlier months.
+  // The tracker: per room, the latest record and whether it is due.
   app.get('/api/room-care', authMiddleware, (req, res) => {
     if (!canSee(who(req))) return res.status(403).json({ message: 'Room care is for supervisors and managers.' });
     const now = today();
-    const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(req.query.month || '')) && req.query.month <= now.slice(0, 7) ? req.query.month : now.slice(0, 7);
     const tracker = {};
     for (const [type, rule] of Object.entries(ROOM_CARE)) {
       const done = records(type);
       const latest = new Map(done.map(({ key, ...last }) => [key, last]));
-      const keys = rule.by === 'room' ? ROOMS : BLOCKS.map((block) => block.name);
-      const rows = keys.map((key) => {
+      const rows = ROOMS.map((key) => {
         const last = latest.get(key) || null;
         const dueOn = last ? addMonths(last.date, rule.months) : null;
         return { key, last, dueOn, due: !last || dueOn <= now };
       });
-      tracker[type] = { label: rule.label, months: rule.months, by: rule.by, rows, dueCount: rows.filter((row) => row.due).length, neverCount: rows.filter((row) => !row.last).length, first: done[0]?.date || null };
-      // Drainage: what was done in each week of the month, for the monthly sheet.
-      if (type === 'drainage') {
-        tracker[type].month = month;
-        tracker[type].weeks = Object.fromEntries(keys.map((key) => [key, []]));
-        for (const row of done.filter((entry) => entry.date.startsWith(month))) {
-          tracker[type].weeks[row.key]?.push({ week: Math.min(4, Math.ceil(Number(row.date.slice(8)) / 7)), date: row.date, status: row.status, remarks: row.remarks, reportId: row.reportId });
-        }
-      }
+      tracker[type] = { label: rule.label, months: rule.months, by: rule.by, rows, dueCount: rows.filter((row) => row.due).length, neverCount: rows.filter((row) => !row.last).length };
     }
     res.json({ today: now, blocks: BLOCKS, tracker });
   });
 
-  // History: every record of one log, newest first, optionally for one room or block only.
+  // History: every record of one log, newest first, optionally for one room (or, on old drainage reports, block) only.
   app.get('/api/room-care/history', authMiddleware, (req, res) => {
     if (!canSee(who(req))) return res.status(403).json({ message: 'Room care is for supervisors and managers.' });
     const { type, key } = req.query;
