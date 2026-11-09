@@ -1396,10 +1396,6 @@ select.hk-select:invalid { color: var(--slate); }
 .care-only-due { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
 .care-only-due input { width: auto; margin: 0; }
 .care-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; }
-.care-key { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-left: 6px; border: 1px solid; }
-.care-key.ok, .care-room.ok { background: #e8f5ee; border-color: #9fd3b8; }
-.care-key.due, .care-room.due { background: #fdecea; border-color: #f1b3ad; }
-.care-key.never, .care-room.never { background: #f3f4f6; border-color: #e5e7eb; }
 .care-blocks { display: grid; gap: 10px; }
 .care-block { display: grid; grid-template-columns: 90px 1fr; gap: 10px; align-items: start; }
 .care-block > b { padding-top: 8px; font-size: 14px; }
@@ -1408,7 +1404,6 @@ select.hk-select:invalid { color: var(--slate); }
 .care-room span { font-weight: 600; font-size: 13px; }
 .care-room small { font-size: 11px; color: var(--slate); }
 .care-room:disabled { cursor: default; opacity: 1; }
-.care-room.remark { box-shadow: inset 0 -3px 0 #e0a100; }
 @media (max-width: 640px) { .care-block { grid-template-columns: 1fr; gap: 4px; } .care-block > b { padding-top: 0; } }
 .entry-card .care-items label.care-item { flex-direction: row; align-items: center; gap: 6px; font-size: 14px; font-weight: 500; color: var(--ink); }
 .drainage-blocks { align-items: start; }
@@ -1737,3 +1732,21 @@ summary { color: #1d4ed8; }
 
 /* Water drainage form: Done or Issue beside the room */
 .drainage-status { display: flex; flex-direction: column; gap: 7px; font-size: 12px; font-weight: 700; color: var(--slate); }
+
+
+/* Room care marks: done (solid green, tick), not done (light red, cross), issue (amber, warning) */
+.care-room { min-width: 62px; border-width: 2px; }
+.care-room-top { display: inline-flex; align-items: center; gap: 4px; font-weight: 700; font-size: 13px; }
+.care-room.done { background: #15803d; border-color: #15803d; color: #fff; }
+.care-room.done small { color: #dcfce7; }
+.care-room.notdone { background: #fef2f2; border-color: #f87171; color: #991b1b; }
+.care-room.notdone small { color: #b91c1c; }
+.care-room.issue { background: #f59e0b; border-color: #b45309; color: #3b2300; }
+.care-room.issue small { color: #4a2c00; }
+.care-room:not(:disabled):hover { filter: brightness(.95); }
+.care-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 12px; }
+.care-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; font-size: 13px; border: 2px solid; }
+.care-chip.done { background: #15803d; border-color: #15803d; color: #fff; }
+.care-chip.notdone { background: #fef2f2; border-color: #f87171; color: #991b1b; }
+.care-chip.issue { background: #f59e0b; border-color: #b45309; color: #3b2300; }
+.drainage-status.unset .ok-toggle { outline: 2px dashed #f59e0b; outline-offset: 2px; border-radius: 8px; }

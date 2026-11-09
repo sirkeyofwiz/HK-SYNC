@@ -20,11 +20,17 @@ function roomTitle(type, row) {
   return `Room ${row.key}: ${careDetail(type, row.last).toLowerCase()} on ${deadlineLabel(row.last.date)} (${row.last.by})${row.last.remarks ? ` · “${row.last.remarks}”` : ''} · ${row.due ? 'due now' : `next due ${deadlineLabel(row.dueOn)}`} · tap for its history`;
 }
 
+// Each room's mark: an issue on its latest record, else done until it is due again, else not done. For drainage an issue
+// is a room marked Issue (supervisors also write notes like "All ok"); for the other logs, any problem noted. A later
+// record without a problem clears the issue.
+export const roomState = (row, type) => (row.last && (type === 'drainage' ? row.last.status === 'Issue' : row.last.remarks) ? 'issue' : row.last && !row.due ? 'done' : 'notdone');
+const STATES = { done: ['Done', 'check'], notdone: ['Not done', 'x'], issue: ['Issue', 'alert'] };
+
 function RoomGrid({ type, list, blocks, onlyDue, openHistory }) {
   const byRoom = new Map(list.rows.map((row) => [row.key, row]));
-  const shown = blocks.map((block) => ({ ...block, rows: block.rooms.map((room) => byRoom.get(room)).filter((row) => row && (!onlyDue || row.due)) })).filter((block) => block.rows.length);
-  if (!shown.length) return <Empty text="Nothing is due. Every room is up to date." />;
-  return <div className="care-blocks">{shown.map((block) => <div className="care-block" key={block.name}><b>{block.name}</b><div className="care-rooms">{block.rows.map((row) => <button type="button" key={row.key} className={`care-room ${!row.last ? 'never' : row.due ? 'due' : 'ok'} ${row.last?.remarks ? 'remark' : ''}`} title={roomTitle(type, row)} aria-label={roomTitle(type, row)} disabled={!row.last} onClick={() => openHistory(row.key)}><span>{row.key}</span><small>{row.last ? short(row.last.date) : '—'}</small></button>)}</div></div>)}</div>;
+  const shown = blocks.map((block) => ({ ...block, rows: block.rooms.map((room) => byRoom.get(room)).filter((row) => row && (!onlyDue || roomState(row, type) !== 'done')) })).filter((block) => block.rows.length);
+  if (!shown.length) return <Empty text="Every room is done. Nothing is due and no issues are open." />;
+  return <div className="care-blocks">{shown.map((block) => <div className="care-block" key={block.name}><b>{block.name}</b><div className="care-rooms">{block.rows.map((row) => { const state = roomState(row, type); const [word, icon] = STATES[state]; return <button type="button" key={row.key} className={`care-room ${state}`} title={roomTitle(type, row)} aria-label={`${word}. ${roomTitle(type, row)}`} disabled={!row.last} onClick={() => openHistory(row.key)}><span className="care-room-top"><Icon name={icon} size={13} />{row.key}</span><small>{row.last ? (state === 'notdone' ? 'due' : short(row.last.date)) : 'not done'}</small></button>; })}</div></div>)}</div>;
 }
 
 // Every record of one room, newest first.
@@ -72,11 +78,11 @@ export function RoomCare({ request, chooseType, allowedTypes, openReport, export
   const list = data.tracker[type];
   return <div className="room-care">
     <div className="segmented care-tabs" role="tablist" aria-label="Room care log">{ROOM_CARE_TYPES.map((key) => <button type="button" role="tab" key={key} aria-selected={type === key} className={type === key ? 'active' : ''} onClick={() => setType(key)}>{TYPES[key]} <span className="tab-count">{data.tracker[key].dueCount} due</span></button>)}</div>
-    <div className="care-summary"><div className="segmented care-view" role="group" aria-label="Show">{[['tracker', 'What is due'], ['history', 'History']].map(([key, label]) => <button type="button" key={key} aria-pressed={view === key} className={view === key ? 'active' : ''} onClick={() => setView(key)}>{label}</button>)}</div><div className="care-actions">{view === 'tracker' && <label className="care-only-due"><input type="checkbox" checked={onlyDue} onChange={(e) => setOnlyDue(e.target.checked)} /> Only show what is due</label>}{allowedTypes.includes(type) && <button type="button" className="primary" onClick={() => chooseType(type)}><Icon name="plus" />New {TYPES[type]}</button>}</div></div>
+    <div className="care-summary"><div className="segmented care-view" role="group" aria-label="Show">{[['tracker', 'What is due'], ['history', 'History']].map(([key, label]) => <button type="button" key={key} aria-pressed={view === key} className={view === key ? 'active' : ''} onClick={() => setView(key)}>{label}</button>)}</div><div className="care-actions">{view === 'tracker' && <label className="care-only-due"><input type="checkbox" checked={onlyDue} onChange={(e) => setOnlyDue(e.target.checked)} /> Only show rooms not done or with issues</label>}{allowedTypes.includes(type) && <button type="button" className="primary" onClick={() => chooseType(type)}><Icon name="plus" />New {TYPES[type]}</button>}</div></div>
     {view === 'history' ? <HistoryList type={type} request={request} openReport={openReport} openHistory={setHistory} exportRows={exportRows} /> : <>
       <p className="care-count"><b>{plural(list.dueCount, 'room')} due</b> of {list.rows.length} · done {ROOM_CARE_EVERY[type]}{list.neverCount ? ` · ${list.neverCount} never recorded` : ''}</p>
       {type === 'drainage' && <div className="entry-card drainage-steps"><p className="kicker">PROCEDURE · EMPTY ROOMS</p><ol>{DRAINAGE_STEPS.map((step) => <li key={step}>{step}</li>)}</ol></div>}
-      <p className="muted care-legend"><span className="care-key ok" /> Done, not due yet <span className="care-key due" /> Due again <span className="care-key never" /> Never recorded · Tap a room for its history.</p><RoomGrid type={type} list={list} blocks={data.blocks} onlyDue={onlyDue} openHistory={setHistory} />
+      {(() => { const counts = { done: 0, notdone: 0, issue: 0 }; for (const row of list.rows) counts[roomState(row, type)] += 1; return <div className="care-legend" aria-label="Rooms by mark">{Object.entries(STATES).map(([state, [word, icon]]) => <span key={state} className={`care-chip ${state}`}><Icon name={icon} size={14} /><b>{counts[state]}</b> {word.toLowerCase()}</span>)}<small className="muted">Tap a room for its history.</small></div>; })()}<RoomGrid type={type} list={list} blocks={data.blocks} onlyDue={onlyDue} openHistory={setHistory} />
     </>}
     {history && <RecordHistory type={type} recordKey={history} request={request} openReport={openReport} close={() => setHistory(null)} />}
   </div>;
