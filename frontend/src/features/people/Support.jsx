@@ -15,6 +15,7 @@ const recurring = (texts) => issueCounts(texts.filter(Boolean).map((text) => ({ 
 
 export const hkProblems = (profile) => [
   ...(profile.rooms && profile.average !== null && profile.average < 7 ? [`Average ${profile.average}/10 (below 7)`] : []),
+  ...(profile.guestInteraction != null && profile.guestInteraction < 7 ? [`Guest interaction ${profile.guestInteraction}/10 (below 7)`] : []),
   ...profile.weaknesses.map((item) => `${item.label} ${item.average}/10 (team ${item.team})`),
   ...(profile.flagged?.length ? [`${plural(profile.flagged.length, 'room')} under 6/10`] : []),
   ...recurring((profile.remarks || []).map((remark) => remark.text))

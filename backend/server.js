@@ -513,7 +513,9 @@ function profileFor(name, { people, team }) {
     // Remarks have their own list now, so flagged rooms are the low-scoring ones.
     flagged: person.rooms.filter((room) => room.average < 6).reverse().slice(0, 10),
     remarks: [...person.remarks].reverse().slice(0, 300),
-    checks: [...person.checks].reverse().slice(0, 10)
+    checks: [...person.checks].reverse().slice(0, 10),
+    // The latest Guest Interaction Check is their current level (skills improve), for "What needs attention".
+    guestInteraction: [...person.checks].sort((a, b) => String(a.date).localeCompare(String(b.date))).at(-1)?.average ?? null
   };
 }
 
@@ -1397,6 +1399,7 @@ app.get('/api/supervisor-profiles/:id', authMiddleware, requireManager, (req, re
 // A room counts its average score (out of 10), as for HK points. One inspected room is enough to be listed:
 // inspections rotate week by week, and a bad day should be spotted early so someone can talk to them. The thresholds match
 // One line splits them, so every inspected housekeeper is on a list: 7 and above is doing well, under 7 needs support.
+// The line applies to the overall average and to each area on its own (rooms, guest interaction).
 const PERFORMANCE_DAYS = 30;
 const PERFORMANCE_SPLIT = WEAKNESS_BELOW;
 const PERFORMANCE_MIN_ROOMS = 1;
@@ -1417,9 +1420,10 @@ app.get('/api/hk-performance', authMiddleware, requireManager, (req, res) => {
       const key = nameKey(line.entry?.hkName);
       const values = scoreValues(line.entry);
       if (!roster.has(key) || !values.length) continue;
-      const person = people.get(key) || { name: roster.get(key), rooms: 0, checks: 0, total: 0, lastInspected: '', items: new Map() };
-      if (report.type === 'guest_interaction') person.checks += 1; else person.rooms += 1;
-      person.total += sum(values) / values.length;
+      const person = people.get(key) || { name: roster.get(key), rooms: 0, checks: 0, total: 0, roomTotal: 0, guestTotal: 0, lastInspected: '', items: new Map() };
+      const lineAverage = sum(values) / values.length;
+      if (report.type === 'guest_interaction') { person.checks += 1; person.guestTotal += lineAverage; } else { person.rooms += 1; person.roomTotal += lineAverage; }
+      person.total += lineAverage;
       if (String(report.date) > person.lastInspected) person.lastInspected = String(report.date);
       for (const item of Object.keys(line.entry.scores || {})) {
         const value = itemScore(line.entry, item);
@@ -1433,14 +1437,21 @@ app.get('/api/hk-performance', authMiddleware, requireManager, (req, res) => {
   const ranked = [...people.values()].filter((person) => person.rooms + person.checks >= PERFORMANCE_MIN_ROOMS).map((person) => {
     // The weakest item tells the supervisor what to coach.
     const weakest = [...person.items.entries()].map(([label, values]) => ({ label, average: round1(average(values)) })).sort((a, b) => a.average - b.average)[0] || null;
-    return { name: person.name, rooms: person.rooms, checks: person.checks, average: round1(person.total / (person.rooms + person.checks)), lastInspected: person.lastInspected, weakest };
+    // Rooms and guest interaction are judged apart as well: good rooms must not hide a low guest check (or the other way
+    // round), so an area under the line puts the housekeeper on "needs support" even when the overall average is 7+.
+    const roomAverage = person.rooms ? round1(person.roomTotal / person.rooms) : null;
+    const guestAverage = person.checks ? round1(person.guestTotal / person.checks) : null;
+    const below = [['Rooms', roomAverage], ['Guest interaction', guestAverage]].filter(([, value]) => value !== null && value < PERFORMANCE_SPLIT).map(([label, value]) => ({ label, average: value }));
+    const overall = round1(person.total / (person.rooms + person.checks));
+    return { name: person.name, rooms: person.rooms, checks: person.checks, average: overall, roomAverage, guestAverage, below, needsSupport: overall < PERFORMANCE_SPLIT || below.length > 0, lastInspected: person.lastInspected, weakest };
   });
+  const lowest = (row) => Math.min(row.average, ...row.below.map((area) => area.average));
   return res.json({
     days: PERFORMANCE_DAYS, since, until, minRooms: PERFORMANCE_MIN_ROOMS, goodAt: PERFORMANCE_SPLIT, supportBelow: PERFORMANCE_SPLIT,
     inspected: people.size, ranked: ranked.length,
     supervisors: supervisorPerformance(since, until),
-    top: ranked.filter((row) => row.average >= PERFORMANCE_SPLIT).sort((a, b) => b.average - a.average || b.rooms - a.rooms),
-    support: ranked.filter((row) => row.average < PERFORMANCE_SPLIT).sort((a, b) => a.average - b.average || b.rooms - a.rooms)
+    top: ranked.filter((row) => !row.needsSupport).sort((a, b) => b.average - a.average || b.rooms - a.rooms),
+    support: ranked.filter((row) => row.needsSupport).sort((a, b) => lowest(a) - lowest(b) || a.average - b.average || b.rooms - a.rooms)
   });
 });
 
