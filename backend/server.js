@@ -457,8 +457,8 @@ function buildProfiles(period) {
         if (!team.has(label)) team.set(label, []);
         team.get(label).push(value);
       }
-      // A remark counts even on a line left unscored; guest interaction notes are coaching notes, shown with the checks.
-      const remark = report.type === 'guest_interaction' ? '' : String(line.entry?.remarks || '').trim();
+      // A remark counts even on a line left unscored (guest interaction coaching notes too).
+      const remark = String(line.entry?.remarks || '').trim();
       if (!line.entry?.hkName || (!scored.length && !remark)) continue;
       const key = nameKey(line.entry.hkName);
       const person = people.get(key) || { items: new Map(), rooms: [], checks: [], remarks: [] };
@@ -1411,13 +1411,14 @@ app.get('/api/hk-performance', authMiddleware, requireManager, (req, res) => {
   const roster = new Map(currentRoster().map(({ name }) => [nameKey(name), name]));
   const people = new Map();
   for (const report of state.reports) {
-    if (report.voided || !HK_POINT_TYPES.includes(report.type) || String(report.date) < since || String(report.date) > until) continue;
+    // Guest Interaction Checks count too: each check is one more score in the housekeeper's average.
+    if (report.voided || ![...HK_POINT_TYPES, 'guest_interaction'].includes(report.type) || String(report.date) < since || String(report.date) > until) continue;
     for (const line of profileLines(report)) {
       const key = nameKey(line.entry?.hkName);
       const values = scoreValues(line.entry);
       if (!roster.has(key) || !values.length) continue;
-      const person = people.get(key) || { name: roster.get(key), rooms: 0, total: 0, lastInspected: '', items: new Map() };
-      person.rooms += 1;
+      const person = people.get(key) || { name: roster.get(key), rooms: 0, checks: 0, total: 0, lastInspected: '', items: new Map() };
+      if (report.type === 'guest_interaction') person.checks += 1; else person.rooms += 1;
       person.total += sum(values) / values.length;
       if (String(report.date) > person.lastInspected) person.lastInspected = String(report.date);
       for (const item of Object.keys(line.entry.scores || {})) {
@@ -1429,10 +1430,10 @@ app.get('/api/hk-performance', authMiddleware, requireManager, (req, res) => {
       people.set(key, person);
     }
   }
-  const ranked = [...people.values()].filter((person) => person.rooms >= PERFORMANCE_MIN_ROOMS).map((person) => {
+  const ranked = [...people.values()].filter((person) => person.rooms + person.checks >= PERFORMANCE_MIN_ROOMS).map((person) => {
     // The weakest item tells the supervisor what to coach.
     const weakest = [...person.items.entries()].map(([label, values]) => ({ label, average: round1(average(values)) })).sort((a, b) => a.average - b.average)[0] || null;
-    return { name: person.name, rooms: person.rooms, average: round1(person.total / person.rooms), lastInspected: person.lastInspected, weakest };
+    return { name: person.name, rooms: person.rooms, checks: person.checks, average: round1(person.total / (person.rooms + person.checks)), lastInspected: person.lastInspected, weakest };
   });
   return res.json({
     days: PERFORMANCE_DAYS, since, until, minRooms: PERFORMANCE_MIN_ROOMS, goodAt: PERFORMANCE_SPLIT, supportBelow: PERFORMANCE_SPLIT,

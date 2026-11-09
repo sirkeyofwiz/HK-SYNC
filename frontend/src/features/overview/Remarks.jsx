@@ -6,10 +6,10 @@ import { Icon } from '../../components/icons';
 
 // Manager Overview: the remarks supervisors write on room inspections, gathered in one place so nobody has to open
 // report after report. Each remark links to its room line in the report and can become a follow-up task.
-const REMARK_TYPES = ['quality', 'neglected', 'trolley_pantry', 'inspection_rate'];
+const REMARK_TYPES = ['quality', 'neglected', 'trolley_pantry', 'guest_interaction', 'inspection_rate'];
 // Two audiences, never mixed: what supervisors found in housekeepers' rooms, and what managers found in supervisors' rooms.
 const AUDIENCES = [
-  { key: 'hk', label: 'About housekeepers', from: 'from supervisors', types: ['quality', 'neglected', 'trolley_pantry'], reports: 'Quality, Neglected Area and Trolley / Pantry reports', person: 'housekeeper', kicker: 'WHAT SUPERVISORS FOUND' },
+  { key: 'hk', label: 'About housekeepers', from: 'from supervisors', types: ['quality', 'neglected', 'trolley_pantry', 'guest_interaction'], reports: 'Quality, Neglected Area, Trolley / Pantry and Guest Interaction reports', person: 'housekeeper', kicker: 'WHAT SUPERVISORS FOUND' },
   { key: 'sup', label: 'About supervisors', from: 'from managers', types: ['inspection_rate'], reports: 'Inspection Rate Program reports', person: 'supervisor', kicker: 'WHAT MANAGERS FOUND' }
 ];
 const PERIODS = [['today', 'Today', 0], ['week', '7 days', 6], ['month', '30 days', 29]];
