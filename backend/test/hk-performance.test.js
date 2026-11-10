@@ -39,6 +39,8 @@ test('a Guest Interaction Check counts: a housekeeper with only a guest check is
   assert.equal(ida.rooms, 0);
   const profile = (await server.call('GET', `/api/hk-profiles/${encodeURIComponent('Ida Guest')}`, { token: manager })).body;
   assert.ok((profile.remarks || profile.profile?.remarks || []).some((remark) => remark.text === 'Shy with guests'), 'the coaching note is in the profile remarks');
+  assert.deepEqual(profile.profile.byInspection.map((visit) => [visit.kind, visit.average]), [['guest_interaction', 5]], 'the guest check is a bar on the trend chart');
+  assert.equal(profile.profile.trend.at(-1).average, 5, 'and counts in the month');
 });
 
 test('a low guest interaction check puts a housekeeper on needs support even when her rooms lift the overall average', async () => {

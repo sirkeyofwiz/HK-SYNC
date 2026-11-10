@@ -471,9 +471,9 @@ function buildProfiles(period) {
       if (remark) person.remarks.push({ reportId: report.id, line: { list: line.list, index: line.index }, date: report.date, createdAt: report.createdAt || '', type: report.type, place: line.place, block: report.data?.block || report.data?.area || '', score: lineAverage, text: remark, by: userName(report.submittedBy), byId: report.submittedBy });
       if (!scored.length) { people.set(key, person); continue; }
       if (report.type === 'guest_interaction') {
-        person.checks.push({ date: report.date, scores: Object.fromEntries(INTERACTION_ITEMS.map((item) => [item, itemScore(line.entry, item)])), average: lineAverage, note: line.entry.remarks || '' });
+        person.checks.push({ reportId: report.id, createdAt: report.createdAt || '', kind: report.type, type: TYPE_LABELS[report.type], date: report.date, scores: Object.fromEntries(INTERACTION_ITEMS.map((item) => [item, itemScore(line.entry, item)])), average: lineAverage, note: line.entry.remarks || '' });
       } else {
-        person.rooms.push({ reportId: report.id, date: report.date, kind: report.type, type: TYPE_LABELS[report.type], place: line.place, average: lineAverage, remarks: line.entry.remarks || '' });
+        person.rooms.push({ reportId: report.id, date: report.date, createdAt: report.createdAt || '', kind: report.type, type: TYPE_LABELS[report.type], place: line.place, average: lineAverage, remarks: line.entry.remarks || '' });
       }
       people.set(key, person);
     }
@@ -486,15 +486,18 @@ function profileFor(name, { people, team }) {
   const items = [...person.items.values()].map((item) => ({ label: item.label, group: item.group, average: round1(average(item.values)), count: item.values.length, team: round1(average(team.get(item.label) || [])) }))
     .sort((a, b) => PROFILE_GROUPS.indexOf(a.group) - PROFILE_GROUPS.indexOf(b.group) || a.average - b.average);
   const rated = items.filter((item) => item.count >= PROFILE_MIN_SCORES);
+  // The trend charts take rooms and Guest Interaction Checks alike (a check is one score, like one room).
+  const scoredLines = [...person.rooms, ...person.checks.map((check) => ({ reportId: check.reportId, date: check.date, createdAt: check.createdAt, kind: check.kind, type: check.type, place: '', average: check.average }))]
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.createdAt).localeCompare(String(b.createdAt)));
   const months = new Map();
-  for (const room of person.rooms) {
+  for (const room of scoredLines) {
     const month = String(room.date).slice(0, 7);
     if (!months.has(month)) months.set(month, []);
     months.get(month).push(room.average);
   }
   // The same rooms per inspection (one report = one inspection): the latest 30, oldest first, for the trend chart.
   const inspections = new Map();
-  for (const room of person.rooms) {
+  for (const room of scoredLines) {
     const visit = inspections.get(room.reportId) || { reportId: room.reportId, date: room.date, kind: room.kind, type: room.type, places: [], values: [] };
     visit.places.push(room.place);
     visit.values.push(room.average);
@@ -513,7 +516,7 @@ function profileFor(name, { people, team }) {
     // Remarks have their own list now, so flagged rooms are the low-scoring ones.
     flagged: person.rooms.filter((room) => room.average < 6).reverse().slice(0, 10),
     remarks: [...person.remarks].reverse().slice(0, 300),
-    checks: [...person.checks].reverse().slice(0, 10),
+    checks: [...person.checks].reverse().slice(0, 10).map(({ reportId, createdAt, kind, type, ...check }) => check),
     // The latest Guest Interaction Check is their current level (skills improve), for "What needs attention".
     guestInteraction: [...person.checks].sort((a, b) => String(a.date).localeCompare(String(b.date))).at(-1)?.average ?? null
   };
