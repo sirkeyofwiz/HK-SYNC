@@ -97,7 +97,7 @@ export function SupervisorPerformancePanel({ performance: current, openSuperviso
   </section>;
 }
 // Today's field staff: who has filed a report and who has not. A supervisor opens their profile; anyone else their reports today.
-const FIELD_ROLES = ['supervisor', 'driver', 'storekeeper', 'store_supervisor'];
+const FIELD_ROLES = ['supervisor', 'driver', 'storekeeper', 'store_supervisor', 'laundry'];
 function ActiveStaffDialog({ staff, todayReports, close, openSup, openReports }) {
   const filed = new Set(todayReports.map((item) => item.submittedBy));
   const people = staff.filter((person) => (FIELD_ROLES.includes(person.role) && person.active !== false) || filed.has(person.id)).map((person) => ({ ...person, count: todayReports.filter((item) => item.submittedBy === person.id).length })).sort((a, b) => Number(b.count > 0) - Number(a.count > 0) || a.name.localeCompare(b.name));

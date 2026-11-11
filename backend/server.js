@@ -11,6 +11,7 @@ import Database from 'better-sqlite3';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import webpush from 'web-push';
 import { registerStore } from './store.js';
+import { registerLaundry } from './laundry.js';
 import { registerSupport } from './support.js';
 import { registerNotes } from './notes.js';
 import { prepareRoomCare, registerRoomCare, ROOM_CARE } from './roomcare.js';
@@ -138,6 +139,7 @@ const roleReportTypes = {
   storekeeper: ['tools'],
   store_supervisor: ['tools'],
   driver: ['vehicle'],
+  laundry: [],
   manager: ['neglected', 'quality', 'trolley_pantry', 'handover', 'vehicle', 'tools', 'inspection_rate', 'guest_interaction', 'mattress_rotation', 'upholstery', 'drainage'],
   assistant_manager: ['neglected', 'quality', 'trolley_pantry', 'handover', 'vehicle', 'tools', 'inspection_rate', 'guest_interaction', 'mattress_rotation', 'upholstery', 'drainage']
 };
@@ -988,7 +990,7 @@ app.get('/api/users/all', authMiddleware, (req, res) => {
 });
 
 // Managers can manage everyone else; assistant managers only field staff, so they can't lock out the manager or each other.
-const FIELD_STAFF_ROLES = ['supervisor', 'driver', 'storekeeper', 'store_supervisor'];
+const FIELD_STAFF_ROLES = ['supervisor', 'driver', 'storekeeper', 'store_supervisor', 'laundry'];
 function canManageRole(actor, role) {
   return actor.role === 'manager' ? role !== 'manager' : FIELD_STAFF_ROLES.includes(role);
 }
@@ -1260,6 +1262,20 @@ registerRoomCare(app, { authMiddleware, who: (req) => currentUser(req), reports:
 // Housekeeping store (items, day sheets, occupancy, budgets, consumption reports): see store.js. Hidden until
 // STORE_ENABLED=true is set (Railway variable on the API): its data is kept, but the app shows nothing of it.
 registerStore(app, { database, authMiddleware, findUser: (id) => state.users.find((user) => user.id === id), today: () => dateInAppZone(0), enabled: process.env.STORE_ENABLED === 'true' });
+
+// Guest laundry (bags from the room to the laundry and back, laundry shift handovers, reminders): see laundry.js.
+const minutesEnv = (name, fallback) => (Number(process.env[name]) > 0 ? Number(process.env[name]) * 60 * 1000 : fallback);
+registerLaundry(app, {
+  database, authMiddleware,
+  users: () => state.users,
+  findUser: (id) => state.users.find((user) => user.id === id),
+  notify: (userId, notification) => notify(userId, notification),
+  clearNotifications: (userId, matches) => markNotificationsRead(userId, matches),
+  quiet: (user) => inQuietHours(notifySettings(user)),
+  broadcast: () => io.emit('laundry:changed'),
+  reminderMs: { express: minutesEnv('LAUNDRY_EXPRESS_REMINDER_MINUTES', 10 * 60 * 1000), standard: minutesEnv('LAUNDRY_STANDARD_REMINDER_MINUTES', 60 * 60 * 1000) },
+  checkMs: Number(process.env.LAUNDRY_REMINDER_CHECK_MS) || 60 * 1000
+});
 
 app.get('/api/hk-roster', authMiddleware, (req, res) => {
   return res.json({ names: currentRoster().map((row) => row.name) });
@@ -1912,9 +1928,9 @@ function discussionIndex(userId) {
 // ---------- Notifications ----------
 // Every alert is stored (for the 🔔 list) and pushed to the person's devices unless they have the app open on screen,
 // it's their quiet hours (urgent tasks still come through), or they turned that kind of alert off.
-const NOTIFY_CATEGORY = { message: 'messages', question: 'questions', task: 'tasks', task_reminder: 'tasks', report_signed: 'reportSigned', report_flagged: 'reportFlagged', inspected: 'inspected', handover: 'handovers', reaction: 'reactions' };
+const NOTIFY_CATEGORY = { message: 'messages', question: 'questions', task: 'tasks', task_reminder: 'tasks', report_signed: 'reportSigned', report_flagged: 'reportFlagged', inspected: 'inspected', handover: 'handovers', reaction: 'reactions', laundry: 'laundry', laundry_reminder: 'laundry' };
 const DEFAULT_NOTIFY = {
-  categories: { messages: true, questions: true, tasks: true, reportSigned: true, reportFlagged: true, inspected: true, handovers: true, reactions: false },
+  categories: { messages: true, questions: true, tasks: true, reportSigned: true, reportFlagged: true, inspected: true, handovers: true, reactions: false, laundry: true },
   quietHours: { enabled: true, start: '22:00', end: '06:00' },
   preview: true,
   sound: true

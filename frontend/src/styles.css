@@ -1772,3 +1772,71 @@ summary { color: #1d4ed8; }
 .quick-empty { margin: 8px; }
 .quick-search .quick-results .quick-item { justify-content: flex-start; text-align: left; }
 .quick-search .quick-results .quick-item span { flex: 1; }
+
+/* Guest laundry */
+.laundry .heading p { max-width: 760px; }
+.laundry-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+.laundry-stats .panel { display: flex; flex-direction: column; gap: 4px; padding: 16px 18px; margin: 0; }
+.laundry-stats strong { font-size: 28px; line-height: 1.1; }
+.laundry-stats .late strong { color: #dc2626; }
+.laundry-grid { display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); gap: 18px; align-items: start; }
+.laundry-form { display: flex; flex-direction: column; gap: 12px; margin: 0; }
+.laundry-form label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--slate, #64748b); }
+.laundry-form label input, .laundry-form label select, .laundry-form label textarea { width: 100%; max-width: none; box-sizing: border-box; }
+.laundry-form-row { display: grid; grid-template-columns: 1fr 1.4fr; gap: 10px; }
+.laundry-label { margin: 2px 0 -4px; font-size: 13px; color: var(--slate, #64748b); }
+.laundry-form .segmented { display: flex; flex-wrap: wrap; }
+.laundry-form .segmented button { flex: 1; }
+.laundry-counts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.laundry-count { display: grid; grid-template-columns: minmax(0, 1fr) 32px 26px 32px; align-items: center; gap: 4px; border: 1px solid var(--line, #e2e8f0); border-radius: 10px; padding: 4px 4px 4px 10px; font-size: 13px; }
+.laundry-count span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.laundry-count b { text-align: center; }
+.laundry-count button { min-height: 0; height: 30px; width: 32px; padding: 0; margin: 0; display: grid; place-items: center; font-size: 17px; }
+.laundry-form > .primary { align-self: flex-start; }
+.laundry-list { margin: 0; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.laundry-tabs { display: flex; flex-wrap: wrap; gap: 2px; }
+.laundry-list .quick-search-field { max-width: none; }
+.laundry-bags { display: flex; flex-direction: column; gap: 10px; max-height: 900px; overflow-y: auto; }
+.laundry-bag { border: 1px solid var(--line, #e2e8f0); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; background: #fff; }
+.laundry-bag.late { border-color: #fca5a5; background: #fff7f7; }
+.laundry-bag.focused { box-shadow: 0 0 0 3px rgba(37, 99, 235, .25); }
+.laundry-bag-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.laundry-speed { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px; background: #eef2f7; color: #475569; }
+.laundry-speed.express { background: #fef3c7; color: #b45309; }
+.laundry-items, .laundry-note { margin: 0; font-size: 13px; }
+.laundry-note { color: var(--slate, #64748b); font-style: italic; }
+.laundry-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+.laundry-step { font-weight: 600; padding: 3px 9px; border-radius: 999px; background: #eff6ff; color: #1d4ed8; font-size: 12px; }
+.laundry-step.ready { background: #dcfce7; color: #15803d; }
+.laundry-step.out { background: #ede9fe; color: #6d28d9; }
+.laundry-step.returned { background: #f1f5f9; color: #475569; }
+.laundry-due { color: var(--slate, #64748b); }
+.laundry-due.soon { color: #b45309; font-weight: 600; }
+.laundry-due.late { color: #dc2626; font-weight: 600; }
+.laundry-history { list-style: none; margin: 0; padding: 0 0 0 12px; border-left: 2px solid var(--line, #e2e8f0); display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
+.laundry-history li { display: flex; flex-wrap: wrap; gap: 0 6px; }
+.laundry-history li span { font-weight: 600; }
+.laundry-history small { color: var(--slate, #64748b); }
+.laundry-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.laundry-actions input { flex: 1 1 220px; min-width: 0; max-width: none; }
+.laundry-actions button { margin: 0; }
+.laundry-delete { align-self: flex-start; display: inline-flex; align-items: center; gap: 4px; color: #b91c1c; font-size: 12.5px; }
+.laundry-handovers { margin-top: 18px; }
+.laundry-handover-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+.laundry-handover-form label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--slate, #64748b); }
+.laundry-handover-form label.wide { grid-column: 1 / -1; }
+.laundry-handover-form select, .laundry-handover-form textarea { width: 100%; max-width: none; box-sizing: border-box; }
+.laundry-handover-form .primary { justify-self: start; }
+.laundry-handover-list { display: flex; flex-direction: column; gap: 8px; }
+.laundry-handover { border-top: 1px solid var(--line, #e2e8f0); padding-top: 8px; font-size: 13px; }
+.laundry-handover > button { padding: 0; text-align: left; }
+.laundry-handover ul { margin: 6px 0 0; padding-left: 18px; }
+@media (max-width: 900px) {
+  .laundry-grid { grid-template-columns: 1fr; }
+  .laundry-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .laundry-handover-form { grid-template-columns: 1fr; }
+  .laundry-counts { grid-template-columns: 1fr 1fr; }
+  .laundry-count { grid-template-columns: minmax(0, 1fr) 30px 22px 30px; padding-left: 8px; font-size: 12.5px; }
+}
