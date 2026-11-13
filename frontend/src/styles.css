@@ -2103,7 +2103,7 @@ header { gap: 20px; }
   .dash-grid > * > .recent-card { order: 7; }
   .tasks-card > .task-link:nth-child(n+5) { display: none; }
   .recent-card .handover-recent { display: none; }
-  .recent-card > :nth-child(n+5) { display: none; }
+  .recent-card .recent-reports > :nth-child(n+4) { display: none; }
   .overview.v2 .remarks-panel .remark-row:nth-child(n+3) { display: none; }
 }
 
@@ -2115,4 +2115,21 @@ header { gap: 20px; }
   .app.nav-hidden .rail { display: flex; }
   .rail { transition: transform .25s ease, opacity .25s ease; }
   .app.bar-away .rail { transform: translateY(calc(100% + 30px)); opacity: 0; pointer-events: none; }
+}
+
+/* Recent activity: one full-width row under both columns. Reports on the left, shift handovers on the right. */
+.overview.v2 > .recent-card { margin: 20px 0 0; }
+.recent-columns { display: grid; gap: 4px 28px; }
+.recent-columns .handover-recent { margin-top: 0; }
+@media (min-width: 900px) {
+  .recent-columns { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); align-items: start; }
+  .recent-reports { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; }
+  .recent-columns .handover-recent { border-top: 0; padding: 0 0 0 24px; border-left: 1px solid var(--line); min-height: 100%; }
+}
+@media (max-width: 760px) { .overview.v2 > .recent-card { margin-top: 16px; } }
+/* Both columns end on the same line: the last card in the shorter column stretches to meet the other. */
+@media (min-width: 1100px) {
+  .overview.v2 .dash-grid { align-items: stretch; }
+  .overview.v2 .dash-main, .overview.v2 .dash-side { display: flex; flex-direction: column; }
+  .overview.v2 .dash-main > :last-child, .overview.v2 .dash-side > :last-child { flex-grow: 1; }
 }
