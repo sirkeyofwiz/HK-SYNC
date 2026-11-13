@@ -2107,6 +2107,18 @@ app.post('/api/notifications/read', authMiddleware, (req, res) => {
   return res.json({ updated: count });
 });
 
+// Clear notifications from the bell: one ({ ids: [...] }) or all of them ({ all: true }). Only your own.
+app.post('/api/notifications/clear', authMiddleware, (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids : null;
+  if (!ids && !req.body?.all) return res.status(400).json({ message: 'Choose the notifications to clear.' });
+  const gone = state.notifications.filter((entry) => entry.userId === req.user.id && (req.body?.all || ids.includes(entry.id)));
+  for (const notification of gone) deleteRow('notifications', notification.id);
+  const cleared = new Set(gone.map((entry) => entry.id));
+  state.notifications = state.notifications.filter((entry) => !cleared.has(entry.id));
+  if (cleared.size) io.to(req.user.id).emit('notifications:cleared', { ids: [...cleared] });
+  return res.json({ cleared: cleared.size });
+});
+
 app.get('/api/push/key', authMiddleware, (req, res) => res.json({ publicKey: VAPID.publicKey }));
 
 app.post('/api/push/subscribe', authMiddleware, (req, res) => {
