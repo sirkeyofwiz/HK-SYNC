@@ -2140,3 +2140,8 @@ header { gap: 20px; }
 .bell-row .bell-item { padding-right: 40px; }
 .bell-dismiss { position: absolute; top: 6px; right: 6px; width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; color: var(--faint); font-size: 18px; line-height: 1; cursor: pointer; }
 .bell-dismiss:hover, .bell-dismiss:focus-visible { background: var(--raised); color: var(--ink); }
+/* Phones: the contact list sits straight on the page, no box around it, and the page itself scrolls. */
+@media (max-width: 760px) {
+  main .chat:not(.has-active) { height: auto; min-height: 0; }
+  .chat:not(.has-active) .chat-people { padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; overflow: visible; }
+}
