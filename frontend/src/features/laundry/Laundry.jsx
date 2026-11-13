@@ -22,15 +22,55 @@ function Due({ bag, now }) {
   return <span className={`laundry-due ${left < 0 ? 'late' : left < 2 * 60 * 60 * 1000 ? 'soon' : ''}`}>{left < 0 ? `Overdue by ${span(left)}` : `Due ${when(bag.dueAt)} · in ${span(left)}`}</span>;
 }
 
-function BagCard({ bag, rules, now, focused, act, remove, canDelete, meId }) {
+// The + / − counters for the items in a bag (used when logging a bag and when correcting one).
+function ItemCounts({ items, rules, setItems }) {
+  const count = (item, by) => setItems((current) => ({ ...current, [item]: Math.max(0, Math.min(200, (current[item] || 0) + by)) }));
+  return <div className="laundry-counts">{rules.items.map((item) => <div className="laundry-count" key={item}><span>{item}</span><button type="button" className="secondary" aria-label={`One less ${item}`} disabled={!items[item]} onClick={() => count(item, -1)}>−</button><b>{items[item] || 0}</b><button type="button" className="secondary" aria-label={`One more ${item}`} onClick={() => count(item, 1)}>+</button></div>)}</div>;
+}
+
+// Correct a bag that was logged wrong: room, service, Standard/Express, housekeeper, items, note.
+function EditBag({ bag, rules, save, cancel }) {
+  const [form, setForm] = useState(() => ({ room: bag.room, service: bag.service, speed: bag.speed, collectedBy: bag.collectedBy, items: { ...bag.items }, notes: bag.notes || '' }));
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const set = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  const total = Object.values(form.items).reduce((sum, value) => sum + value, 0);
+  const submit = async (event) => {
+    event.preventDefault(); setError('');
+    if (!total) return setError('Count at least one item in the bag.');
+    setSaving(true);
+    try { await save(form); } catch (problem) { setError(problem.message || 'Could not save the changes.'); setSaving(false); }
+  };
+  return <form className="laundry-edit" onSubmit={submit}>
+    <p className="kicker">EDIT BAG {bag.number}</p>
+    <div className="laundry-form-row">
+      <label>Room<input inputMode="numeric" value={form.room} onChange={(e) => set('room', e.target.value)} required /></label>
+      <label>Service<select value={form.service} onChange={(e) => set('service', e.target.value)}>{Object.entries(rules.services).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+    </div>
+    <div className="segmented laundry-speed-pick" role="group" aria-label="Speed">{Object.entries(rules.speeds).map(([key, label]) => <button type="button" key={key} aria-pressed={form.speed === key} className={form.speed === key ? 'active' : ''} onClick={() => set('speed', key)}>{label}</button>)}</div>
+    <label>Housekeeper who brought it from the room<input list="laundry-hk" value={form.collectedBy} onChange={(e) => set('collectedBy', e.target.value)} required /></label>
+    <p className="laundry-label">Items in the bag <b>{total ? `· ${plural(total, 'piece')}` : ''}</b></p>
+    <ItemCounts items={form.items} rules={rules} setItems={(update) => setForm((current) => ({ ...current, items: update(current.items) }))} />
+    <label>Note<textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} /></label>
+    {error && <p className="error-text" role="alert">{error}</p>}
+    <div className="laundry-actions"><button className="primary" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button><button type="button" className="secondary" onClick={cancel} disabled={saving}>Cancel</button></div>
+  </form>;
+}
+
+function BagCard({ bag, rules, now, focused, act, remove, update, canDelete, meId }) {
   const [hkName, setHkName] = useState('');
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
   const ref = useRef(null);
   useEffect(() => { if (focused && ref.current) ref.current.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, [focused]);
   const step = async (to) => { setBusy(true); try { await act(bag, to, hkName); setHkName(''); } finally { setBusy(false); } };
   const needsName = (to) => to === 'out' || (to === 'returned' && !bag.handedOutAt);
   const next = NEXT[bag.status] || [];
+  // Anyone on Guest laundry can correct an open bag; managers can also correct or delete one already returned.
+  // Laundry staff and supervisors can delete only a bag they logged that the laundry has not received yet.
   const deletable = canDelete || (bag.createdById === meId && !bag.receivedAt);
+  const editable = canDelete || bag.status !== 'returned';
+  if (editing) return <article ref={ref} className="laundry-bag editing"><EditBag bag={bag} rules={rules} cancel={() => setEditing(false)} save={async (form) => { await update(bag, form); setEditing(false); }} /></article>;
   return <article ref={ref} className={`laundry-bag ${bag.overdue ? 'late' : ''} ${focused ? 'focused' : ''}`}>
     <div className="laundry-bag-head">
       <div><b>Room {bag.room}</b> <small className="muted">· bag {bag.number}</small></div>
@@ -44,7 +84,11 @@ function BagCard({ bag, rules, now, focused, act, remove, canDelete, meId }) {
       {next.some(needsName) && <input list="laundry-hk" placeholder={bag.status === 'ready' ? 'Housekeeper taking it to the room' : 'Housekeeper who took it to the room'} aria-label="Housekeeper" value={hkName} onChange={(e) => setHkName(e.target.value)} />}
       {next.map((to, index) => <button type="button" key={to} className={index === next.length - 1 ? 'primary' : 'secondary'} disabled={busy || (needsName(to) && !hkName.trim())} onClick={() => step(to)}>{STEP_BUTTON[to]}</button>)}
     </div>}
-    {deletable && bag.status !== 'returned' && <button type="button" className="text laundry-delete" onClick={() => remove(bag)}><Icon name="trash" size={15} />Delete bag</button>}
+    {(editable || deletable) && <div className="laundry-manage">
+      {bag.editedAt && <small className="muted">Edited by {bag.editedByName} · {when(bag.editedAt)}</small>}
+      {editable && <button type="button" className="text laundry-edit-button" onClick={() => setEditing(true)}><Icon name="edit" size={15} />Edit</button>}
+      {deletable && <button type="button" className="text laundry-delete" onClick={() => remove(bag)}><Icon name="trash" size={15} />Delete</button>}
+    </div>}
   </article>;
 }
 
@@ -53,7 +97,6 @@ function NewBag({ rules, create }) {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const set = (key, value) => setForm((current) => ({ ...current, [key]: value }));
-  const count = (item, by) => setForm((current) => { const next = Math.max(0, Math.min(200, (current.items[item] || 0) + by)); return { ...current, items: { ...current.items, [item]: next } }; });
   const total = Object.values(form.items).reduce((sum, value) => sum + value, 0);
   const submit = async (event) => {
     event.preventDefault(); setError('');
@@ -73,7 +116,7 @@ function NewBag({ rules, create }) {
     <div className="segmented" role="group" aria-label="Where is the bag now">{[['collected', 'Collected from room'], ['received', 'Received at laundry']].map(([key, label]) => <button type="button" key={key} aria-pressed={form.stage === key} className={form.stage === key ? 'active' : ''} onClick={() => set('stage', key)}>{label}</button>)}</div>
     <label>Housekeeper who brought it from the room<input list="laundry-hk" placeholder="Name" value={form.collectedBy} onChange={(e) => set('collectedBy', e.target.value)} required /></label>
     <p className="laundry-label">Items in the bag <b>{total ? `· ${plural(total, 'piece')}` : ''}</b></p>
-    <div className="laundry-counts">{rules.items.map((item) => <div className="laundry-count" key={item}><span>{item}</span><button type="button" className="secondary" aria-label={`One less ${item}`} disabled={!form.items[item]} onClick={() => count(item, -1)}>−</button><b>{form.items[item] || 0}</b><button type="button" className="secondary" aria-label={`One more ${item}`} onClick={() => count(item, 1)}>+</button></div>)}</div>
+    <ItemCounts items={form.items} rules={rules} setItems={(update) => setForm((current) => ({ ...current, items: update(current.items) }))} />
     <label>Note (optional)<textarea rows={2} placeholder="e.g. stain on the white shirt, no starch" value={form.notes} onChange={(e) => set('notes', e.target.value)} /></label>
     {error && <p className="error-text" role="alert">{error}</p>}
     <button className="primary" disabled={saving}><Icon name="plus" />{saving ? 'Saving…' : 'Log bag'}</button>
@@ -127,7 +170,8 @@ export function Laundry({ request, me, roster = [], tick = 0, focusId = null, se
     .sort((a, b) => (tab === 'returned' ? String(b.returnedAt).localeCompare(String(a.returnedAt)) : (Number(b.overdue) - Number(a.overdue)) || (a.speed === b.speed ? 0 : a.speed === 'express' ? -1 : 1) || String(a.dueAt || '9').localeCompare(String(b.dueAt || '9'))));
   const create = async (form) => { const result = await request('/laundry/bags', { method: 'POST', body: JSON.stringify(form) }); setMessage(`Bag ${result.bag.number} for room ${result.bag.room} logged.`); await load(); };
   const act = async (bag, to, hkName) => { try { await request(`/laundry/bags/${bag.id}/step`, { method: 'POST', body: JSON.stringify({ to, hkName }) }); await load(); } catch (problem) { setMessage(problem.message); } };
-  const remove = async (bag) => { if (!window.confirm(`Delete bag ${bag.number} for room ${bag.room}?`)) return; try { await request(`/laundry/bags/${bag.id}`, { method: 'DELETE' }); await load(); } catch (problem) { setMessage(problem.message); } };
+  const remove = async (bag) => { if (!window.confirm(`Delete bag ${bag.number} for room ${bag.room}? It will no longer show in Guest laundry.`)) return; try { await request(`/laundry/bags/${bag.id}`, { method: 'DELETE' }); setMessage(`Bag ${bag.number} for room ${bag.room} deleted.`); await load(); } catch (problem) { setMessage(problem.message); } };
+  const update = async (bag, form) => { const result = await request(`/laundry/bags/${bag.id}`, { method: 'PATCH', body: JSON.stringify(form) }); setMessage(`Bag ${result.bag.number} for room ${result.bag.room} updated.`); await load(); };
   const dueSoon = open.filter((bag) => bag.dueAt && !bag.overdue && Date.parse(bag.dueAt) - now < 2 * 60 * 60 * 1000).length;
   const returnedToday = bags.filter((bag) => bag.status === 'returned' && isToday(bag.returnedAt));
   return <div className="laundry">
@@ -144,7 +188,7 @@ export function Laundry({ request, me, roster = [], tick = 0, focusId = null, se
       <section className="panel laundry-list">
         <div className="segmented laundry-tabs" role="tablist" aria-label="Bags">{TABS.map(([key, label]) => <button type="button" role="tab" key={key} aria-selected={tab === key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{label} <span className="tab-count">{counts[key]}</span></button>)}</div>
         <label className="quick-search-field"><Icon name="search" size={18} /><input type="search" placeholder="Room, bag no. or housekeeper" aria-label="Search bags" value={search} onChange={(e) => setSearch(e.target.value)} /></label>
-        {shown.length ? <div className="laundry-bags">{shown.map((bag) => <BagCard key={bag.id} bag={bag} rules={data.rules} now={now} focused={bag.id === focusId} act={act} remove={remove} canDelete={data.canDelete} meId={me.id} />)}</div>
+        {shown.length ? <div className="laundry-bags">{shown.map((bag) => <BagCard key={bag.id} bag={bag} rules={data.rules} now={now} focused={bag.id === focusId} act={act} remove={remove} update={update} canDelete={data.canDelete} meId={me.id} />)}</div>
           : <Empty text={tab === 'open' && !term ? 'No guest bags right now. Log one when you collect it from a room.' : 'No bags here.'} />}
       </section>
     </div>

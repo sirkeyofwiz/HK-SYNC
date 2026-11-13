@@ -2,7 +2,7 @@ import { deadlineLabel, isoDate, localToday, shiftDays } from './format';
 
 // Date periods for looking back at reports and tasks: a few ready-made ones, or any from–to range. Weeks run Monday to
 // Sunday, months from the 1st; an empty from or to leaves that end open.
-export const DATE_PERIODS = [['all', 'All time'], ['today', 'Today'], ['yesterday', 'Yesterday'], ['this_week', 'This week'], ['last_week', 'Last week'], ['this_month', 'This month'], ['last_month', 'Last month'], ['custom', 'Pick dates']];
+export const DATE_PERIODS = [['all', 'All time'], ['today', 'Today'], ['yesterday', 'Yesterday'], ['last_7', 'Last 7 days'], ['this_week', 'This week'], ['last_week', 'Last week'], ['last_30', 'Last 30 days'], ['this_month', 'This month'], ['last_month', 'Last month'], ['custom', 'Pick dates']];
 
 const monday = (day) => shiftDays(day, -((new Date(`${day}T00:00:00`).getDay() + 6) % 7));
 const monthEnd = (start) => { const last = new Date(`${start}T00:00:00`); last.setMonth(last.getMonth() + 1, 0); return isoDate(last); };
@@ -11,6 +11,8 @@ export function periodRange(period = 'all', from = '', to = '', today = localTod
   switch (period) {
     case 'today': return { from: today, to: today };
     case 'yesterday': { const day = shiftDays(today, -1); return { from: day, to: day }; }
+    case 'last_7': return { from: shiftDays(today, -6), to: today };
+    case 'last_30': return { from: shiftDays(today, -29), to: today };
     case 'this_week': { const start = monday(today); return { from: start, to: shiftDays(start, 6) }; }
     case 'last_week': { const start = shiftDays(monday(today), -7); return { from: start, to: shiftDays(start, 6) }; }
     case 'this_month': { const start = `${today.slice(0, 7)}-01`; return { from: start, to: monthEnd(start) }; }
