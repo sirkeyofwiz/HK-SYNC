@@ -97,6 +97,23 @@ test('a laundry shift handover keeps the open bags and tells the next person', a
   assert.equal((await server.call('POST', '/api/laundry/handovers', { token: laundry.token, body: { shift: 'morning', toId: laundry.user.id } })).status, 400, 'not to yourself');
 });
 
+test('a bag can be corrected: room, items, Standard/Express (moves the due time) and the housekeeper', async () => {
+  const created = (await server.call('POST', '/api/laundry/bags', { token: laundry.token, body: bag({ room: '601', stage: 'received' }) })).body.bag;
+  const patch = (who, body) => server.call('PATCH', `/api/laundry/bags/${created.id}`, { token: who, body });
+  assert.equal((await patch(laundry.token, { room: '' })).status, 400);
+  assert.equal((await patch(laundry.token, { speed: 'slow', room: '602' })).status, 400);
+  const fixed = await patch(laundry.token, { room: '602', speed: 'express', collectedBy: 'Halima Said', items: { Dress: 1 } });
+  assert.equal(fixed.status, 200);
+  assert.equal(fixed.body.bag.room, '602');
+  assert.equal(fixed.body.bag.pieces, 1);
+  assert.equal(fixed.body.bag.editedByName, 'Lulu Laundry');
+  assert.equal(Date.parse(fixed.body.bag.dueAt) - Date.parse(fixed.body.bag.receivedAt), 4 * 60 * 60 * 1000, 'Express is due 4 hours after it was received');
+  assert.equal(fixed.body.bag.history[0].hkName, 'Halima Said');
+  await server.call('POST', `/api/laundry/bags/${created.id}/step`, { token: laundry.token, body: { to: 'returned', hkName: 'Asha Juma' } });
+  assert.equal((await patch(laundry.token, { room: '603' })).status, 409, 'once back with the guest only a manager can fix it');
+  assert.equal((await patch(manager, { room: '603' })).status, 200);
+});
+
 test('only a manager deletes a bag the laundry has received', async () => {
   const received = (await server.call('POST', '/api/laundry/bags', { token: laundry.token, body: bag({ room: '501', stage: 'received' }) })).body.bag;
   assert.equal((await server.call('DELETE', `/api/laundry/bags/${received.id}`, { token: laundry.token })).status, 403);

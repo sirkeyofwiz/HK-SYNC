@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { HistorySelect } from '../../components/HistorySelect';
 import { Empty } from '../../components/ui';
 import { buildImport, recognise } from './importExcel';
 import { Icon } from '../../components/icons';
@@ -26,7 +27,7 @@ function BookPicker({ books, book, setBook, all = false }) {
   return <div className="segmented store-books" role="tablist" aria-label="Store book">{[...(all ? [['all', { short: 'All books' }]] : []), ...Object.entries(books)].map(([key, info]) => <button type="button" role="tab" key={key} aria-selected={book === key} className={book === key ? 'active' : ''} onClick={() => setBook(key)}>{info.short}</button>)}</div>;
 }
 function MonthPicker({ month, setMonth, max }) {
-  return <div className="store-month"><button type="button" onClick={() => setMonth(shiftMonth(month, -1))} aria-label="Previous month">‹</button><input type="month" value={month} max={max} onChange={(e) => e.target.value && setMonth(e.target.value)} aria-label="Month" /><button type="button" onClick={() => setMonth(shiftMonth(month, 1))} disabled={month >= max} aria-label="Next month">›</button></div>;
+  return <HistorySelect span="month" spans={['month']} anchor={`${month}-01`} today={`${max}-01`} onChange={(view) => setMonth(view.anchor.slice(0, 7))} label="Month" />;
 }
 function Tile({ label, value, note, tone = '' }) {
   return <div className="store-tile"><small>{label}</small><strong className={tone}>{value}</strong>{note && <small>{note}</small>}</div>;

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { TYPES } from '../../lib/constants';
 import { deadlineLabel } from '../../lib/format';
 import { Icon } from '../../components/icons';
@@ -68,14 +68,16 @@ function search(query, { reports, tasks, staff, goals, isManager, allowedTypes }
   return groups;
 }
 
-export function QuickSearch({ reports, tasks, staff, goals, isManager, allowedTypes, setPage, openReport, openTask, openProfile, openSupervisor, chooseType }) {
+export function QuickSearch({ reports, tasks, staff, goals, isManager, allowedTypes, setPage, openReport, openTask, openProfile, openSupervisor, chooseType, autoFocus = false, onDone = () => {} }) {
+  const input = useRef(null);
+  useEffect(() => { if (autoFocus) input.current?.focus(); }, [autoFocus]);
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const box = useRef(null);
   const groups = useMemo(() => search(query, { reports, tasks, staff, goals, isManager, allowedTypes }), [query, reports, tasks, staff, goals, isManager, allowedTypes]);
   const first = groups[0]?.items[0];
   const go = (item) => {
-    setOpen(false); setQuery('');
+    setOpen(false); setQuery(''); onDone();
     if (item.open === 'hk') openProfile(item.name);
     else if (item.open === 'sup') openSupervisor(item.id, item.name);
     else if (item.open === 'report') openReport(item.id, item.line || null);
@@ -85,9 +87,9 @@ export function QuickSearch({ reports, tasks, staff, goals, isManager, allowedTy
   };
   const showing = open && query.trim();
   return <div className="quick-search" ref={box} onBlur={(e) => { if (!box.current?.contains(e.relatedTarget)) setOpen(false); }}>
-    <label className="quick-search-field"><Icon name="search" size={18} /><input type="search" placeholder={isManager ? 'Search people, rooms, reports, tasks…' : 'Search rooms, reports, tasks…'} aria-label="Search" value={query}
+    <label className="quick-search-field"><Icon name="search" size={18} /><input ref={input} type="search" placeholder={isManager ? 'Search people, rooms, reports, tasks…' : 'Search rooms, reports, tasks…'} aria-label="Search" value={query}
       onChange={(e) => { setQuery(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
-      onKeyDown={(e) => { if (e.key === 'Enter' && first) { e.preventDefault(); go(first); } if (e.key === 'Escape') { setQuery(''); setOpen(false); } }} /></label>
+      onKeyDown={(e) => { if (e.key === 'Enter' && first) { e.preventDefault(); go(first); } if (e.key === 'Escape') { setQuery(''); setOpen(false); onDone(); e.currentTarget.blur(); } }} /></label>
     {showing && <div className="quick-results" role="listbox" aria-label="Search results">
       {groups.length ? groups.map((group) => <div className="quick-group" key={group.title}><p className="kicker">{group.title}</p>
         {group.items.map((item) => <button type="button" role="option" aria-selected={item === first} className={`quick-item ${item === first ? 'first' : ''}`} key={item.key} onClick={() => go(item)}><Icon name={item.icon} size={18} /><span><b>{item.title}</b>{item.detail && <small>{item.detail}</small>}</span></button>)}

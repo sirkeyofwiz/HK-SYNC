@@ -162,16 +162,27 @@ export function registerLaundry(app, { database, authMiddleware, users, findUser
     return res.json({ bag: shape(bag) });
   });
 
-  // Fix a mistake (room, counts, service, notes) while the bag is still open.
+  // Fix a mistake (room, counts, service, Standard/Express, housekeeper, notes) while the bag is still open;
+  // managers can also fix a bag that is already back with the guest. Everything is checked before anything changes.
   app.patch('/api/laundry/bags/:id', authMiddleware, access, (req, res) => {
     const bag = bags.get(req.params.id);
     if (!bag || bag.voided) return res.status(404).json({ message: 'That bag was not found.' });
     if (!isOpen(bag) && !MANAGER_ROLES.includes(req.laundryUser.role)) return res.status(409).json({ message: 'This bag is already back with the guest.' });
     const body = req.body || {};
-    if ('room' in body) { const room = clean(body.room, 12); if (!room) return res.status(400).json({ message: 'Enter the room number.' }); bag.room = room; }
-    if ('service' in body) { if (!LAUNDRY_SERVICES[body.service]) return res.status(400).json({ message: 'Choose the service.' }); bag.service = body.service; }
-    if ('items' in body) { const { items, error } = readItems(body.items); if (error) return res.status(400).json({ message: error }); bag.items = items; }
-    if ('notes' in body) bag.notes = clean(body.notes, 300);
+    const change = {};
+    if ('room' in body) { change.room = clean(body.room, 12); if (!change.room) return res.status(400).json({ message: 'Enter the room number.' }); }
+    if ('service' in body) { if (!LAUNDRY_SERVICES[body.service]) return res.status(400).json({ message: 'Choose the service.' }); change.service = body.service; }
+    if ('speed' in body) { if (!LAUNDRY_SPEEDS[body.speed]) return res.status(400).json({ message: 'Choose Standard or Express.' }); change.speed = body.speed; }
+    if ('collectedBy' in body) { change.collectedBy = clean(body.collectedBy); if (!change.collectedBy) return res.status(400).json({ message: 'Enter the housekeeper who brought the bag from the room.' }); }
+    if ('items' in body) { const { items, error } = readItems(body.items); if (error) return res.status(400).json({ message: error }); change.items = items; }
+    if ('notes' in body) change.notes = clean(body.notes, 300);
+    Object.assign(bag, change);
+    // Standard ↔ Express moves the due time (counted from when the laundry received it).
+    if (change.speed && bag.receivedAt) {
+      bag.dueAt = new Date(Date.parse(bag.receivedAt) + DUE_HOURS[bag.speed] * 60 * 60 * 1000).toISOString();
+      if (Date.parse(bag.dueAt) > now()) delete bag.overdueAlertedAt;
+    }
+    if (change.collectedBy) { const first = bag.history.find((row) => row.step === 'collected'); if (first) first.hkName = change.collectedBy; }
     bag.editedAt = iso(); bag.editedByName = req.laundryUser.name;
     saveBag(bag);
     return res.json({ bag: shape(bag) });
