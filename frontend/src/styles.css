@@ -2145,3 +2145,24 @@ header { gap: 20px; }
   main .chat:not(.has-active) { height: auto; min-height: 0; }
   .chat:not(.has-active) .chat-people { padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; overflow: visible; }
 }
+
+/* Day calendar (Shift handovers): pick any day; days with handovers show a gold count. */
+.day-calendar { margin: 4px 0 14px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--card); max-width: 460px; }
+.day-calendar-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.day-calendar-title { display: grid; text-align: center; gap: 2px; }
+.day-calendar-title b { font-family: var(--font-display); font-size: 18px; color: var(--ink); }
+.day-calendar .round-nav { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--line); background: var(--raised); color: var(--ink); font-size: 20px; line-height: 1; cursor: pointer; }
+.day-calendar .round-nav:disabled { opacity: .35; cursor: default; }
+.day-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.day-calendar-weekday { text-align: center; font-size: 11px; letter-spacing: .5px; text-transform: uppercase; color: var(--faint); padding: 2px 0 6px; }
+.day-cell { position: relative; display: grid; place-items: center; aspect-ratio: 1; min-height: 38px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: var(--muted); font-size: 14px; cursor: pointer; padding: 0; }
+.day-cell:hover:not(:disabled) { background: var(--raised); color: var(--ink); }
+.day-cell:disabled { opacity: .3; cursor: default; }
+.day-cell.has { color: var(--ink); font-weight: 600; }
+.day-cell i { position: absolute; bottom: 3px; left: 50%; transform: translateX(-50%); min-width: 16px; padding: 0 4px; border-radius: 8px; background: var(--accent); color: var(--on-accent); font-size: 10px; font-style: normal; font-weight: 700; line-height: 14px; }
+.day-cell.has span { transform: translateY(-5px); }
+.day-cell.today { border-color: var(--line-strong); }
+.day-cell.selected { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.day-cell.selected i { background: var(--on-accent); color: var(--accent); }
+.day-calendar-foot { display: flex; justify-content: space-between; margin-top: 10px; }
+@media (max-width: 760px) { .day-calendar { max-width: none; padding: 12px; } }
