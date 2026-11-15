@@ -56,6 +56,8 @@ test('from the room to the laundry and back: every step keeps who and when', asy
   assert.equal((await server.call('POST', `/api/laundry/bags/${id}/step`, { token: laundry.token, body: { to: 'received' } })).status, 409, 'no going back a step');
   assert.equal((await server.call('POST', `/api/laundry/bags/${id}/step`, { token: laundry.token, body: { to: 'out' } })).status, 400, 'handing out needs the housekeeper');
   await server.call('POST', `/api/laundry/bags/${id}/step`, { token: laundry.token, body: { to: 'ready' } });
+  assert.ok((await alerts(supervisor)).some((alert) => /^Standard bag ready · Room 214/.test(alert.title)), 'supervisors are told when a bag is ready');
+  assert.ok(!(await alerts(laundry)).some((alert) => /bag ready/.test(alert.title)), 'not the person who marked it ready');
   const out = await server.call('POST', `/api/laundry/bags/${id}/step`, { token: laundry2.token, body: { to: 'out', hkName: 'Mwanaidi Ally' } });
   assert.equal(out.body.bag.handedOutByName, 'Neema Laundry');
   assert.equal(out.body.bag.deliveredBy, 'Mwanaidi Ally');

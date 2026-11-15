@@ -159,6 +159,13 @@ export function registerLaundry(app, { database, authMiddleware, users, findUser
     bag.status = to;
     bag.history.push({ step: to, at, byId: user.id, byName: user.name, ...(to === 'out' ? { hkName } : {}), ...(clean(req.body?.note, 200) ? { note: clean(req.body.note, 200) } : {}) });
     saveBag(bag);
+    // Ready: supervisors are told straight away so they can send a housekeeper (not only at the next reminder).
+    if (to === 'ready') {
+      const express = bag.speed === 'express';
+      for (const person of users().filter((entry) => entry.active !== false && entry.role === 'supervisor')) {
+        notify(person.id, { type: 'laundry', fromUserId: user.id, urgent: express, title: `${express ? 'Express' : 'Standard'} bag ready · ${bagTitle(bag)}`, body: `${pieces(bag.items)} pieces · ready at the laundry, send a housekeeper to take it to the room · due back ${dueText(bag.dueAt)}`, link: link(bag) });
+      }
+    }
     return res.json({ bag: shape(bag) });
   });
 
