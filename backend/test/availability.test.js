@@ -62,3 +62,31 @@ test('add and remove items; no duplicates', async () => {
   assert.equal((await server.call('DELETE', `/api/availability/items/${added.body.item.id}`, { token: storekeeper.token })).status, 200);
   assert.ok(!(await get(supervisor.token)).body.items.some((item) => item.name === 'Hangers'));
 });
+
+test('reorder alerts go to supervisors, store supervisors and managers when an item drops below par or runs out', async () => {
+  const storeSup = await createStaff(server, manager, 'store_supervisor', 'Sara Store');
+  const titles = async (who) => ((await server.call('GET', '/api/notifications', { token: who.token || who })).body.notifications || []).filter((n) => n.type === 'stock').map((n) => n.title);
+  const before = { sup: (await titles(supervisor)).length, storeSup: (await titles(storeSup)).length, mgr: (await titles(manager)).length, keeper: (await titles(storekeeper)).length, laundry: (await titles(laundry)).length };
+  const item = (await server.call('POST', '/api/availability/items', { token: storekeeper.token, body: { name: 'Hangers', category: 'Room Equipment', inStock: 30, par: 20 } })).body.item;
+  const set = (inStock) => server.call('PATCH', `/api/availability/items/${item.id}`, { token: storekeeper.token, body: { inStock } });
+
+  await set(25); // still at or above par: nothing
+  assert.equal((await titles(supervisor)).length, before.sup);
+  await set(12); // below par: reorder alert
+  for (const who of [supervisor, storeSup, manager]) assert.equal((await titles(who))[0], 'Reorder: Hangers');
+  await set(8); // still low: no second alert
+  assert.equal((await titles(supervisor)).length, before.sup + 1);
+  await set(0); // out of stock: alert
+  assert.equal((await titles(supervisor))[0], 'Out of stock: Hangers');
+  assert.equal((await titles(storekeeper)).length, before.keeper, 'the person who changed it is not told');
+  assert.equal((await titles(laundry)).length, before.laundry, 'laundry staff are not told');
+  await set(40); await set(5); // back above par, then low again: alerts again
+  assert.equal((await titles(supervisor))[0], 'Reorder: Hangers');
+
+  // An import sends one alert listing every item that newly needs reordering.
+  const count = (await titles(storeSup)).length;
+  await server.call('POST', '/api/availability/import', { token: manager, body: { items: [{ name: 'Towel rail', category: 'Room Equipment', par: 4, inStock: 1 }, { name: 'Soap dish', category: 'Room Equipment', par: 4, inStock: 0 }, { name: 'Lamp', category: 'Room Equipment', par: 2, inStock: 9 }] } });
+  const after = await titles(storeSup);
+  assert.equal(after.length, count + 1);
+  assert.equal(after[0], '2 store items need reordering (1 out of stock)');
+});
