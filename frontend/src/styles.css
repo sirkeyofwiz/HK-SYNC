@@ -2176,3 +2176,55 @@ header { gap: 20px; }
   .bubble, .bubble * { overflow-wrap: anywhere; word-break: break-word; }
   .bubble img, .bubble video, .bubble audio { max-width: 100%; height: auto; }
 }
+
+/* Store availability */
+.stock-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+.stock-stat { display: grid; gap: 4px; text-align: left; padding: 14px 16px; margin: 0; cursor: pointer; border: 1px solid var(--line); }
+.stock-stat small { color: var(--muted); font-size: 12.5px; }
+.stock-stat strong { font-family: var(--font-display); font-size: 28px; line-height: 1.1; }
+.stock-stat.available strong { color: var(--good, #79C2A4); }
+.stock-stat.low strong { color: var(--accent); }
+.stock-stat.out strong { color: var(--bad); }
+.stock-stat.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.stock-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
+.stock-filters .quick-search-field { flex: 1 1 220px; margin: 0; }
+.stock-group { margin: 0 0 14px; }
+.stock-group .panel-title { margin-bottom: 4px; }
+.stock-row { border-top: 1px solid var(--line); }
+.stock-row:not(.editable), .stock-row-button { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 11px 2px; }
+.stock-row-button { width: 100%; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; border-radius: 10px; }
+.stock-row-button:hover { background: var(--raised); }
+.stock-name { display: grid; gap: 2px; min-width: 0; }
+.stock-name b { color: var(--ink); font-weight: 600; overflow-wrap: anywhere; }
+.stock-name small { font-size: 12px; }
+.stock-qty { display: grid; justify-items: end; line-height: 1.1; }
+.stock-qty strong { font-size: 20px; color: var(--ink); }
+.stock-qty small { font-size: 11px; color: var(--faint); }
+.stock-status { min-width: 96px; text-align: center; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid transparent; }
+.stock-status.available { color: var(--good, #79C2A4); background: var(--good-bg, rgba(121,194,164,.12)); border-color: var(--good-line, rgba(121,194,164,.3)); }
+.stock-status.low { color: var(--accent); background: var(--accent-bg); border-color: var(--line-strong); }
+.stock-status.out { color: var(--bad); background: var(--bad-bg, rgba(227,120,120,.12)); border-color: var(--bad-line, rgba(227,120,120,.3)); }
+.stock-row.out .stock-qty strong { color: var(--bad); }
+.stock-edit { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px 14px; padding: 6px 2px 14px; align-items: end; }
+.stock-edit > .error-text, .stock-edit > .stock-edit-actions, .stock-edit > small { grid-column: 1 / -1; }
+.stock-stepper { display: flex; gap: 6px; align-items: center; }
+.stock-stepper input { width: 80px; text-align: center; }
+.stock-stepper button { width: 40px; height: 40px; padding: 0; }
+.stock-edit-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.stock-edit-actions .danger { margin-left: auto; display: inline-flex; gap: 4px; align-items: center; color: var(--bad); }
+.stock-add { margin-bottom: 14px; }
+.stock-add-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px 14px; margin-bottom: 10px; }
+@media (max-width: 760px) {
+  .stock-stats { gap: 8px; }
+  .stock-stat { padding: 10px 12px; }
+  .stock-stat strong { font-size: 22px; }
+  .stock-row:not(.editable), .stock-row-button { grid-template-columns: minmax(0, 1fr) auto; }
+  .stock-status { grid-column: 1 / -1; justify-self: start; min-width: 0; }
+}
+@media (max-width: 760px) {
+  .availability > .heading > div:last-child:not(:first-child) { display: flex; flex-wrap: wrap; gap: 8px; width: 100%; }
+  .availability > .heading > div:last-child:not(:first-child) > button { flex: 1 1 130px; min-width: 0; margin: 0; justify-content: center; white-space: nowrap; }
+}
+.availability > .heading > div:last-child:not(:first-child) { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; align-items: flex-start; }
+.availability > .heading > div:last-child:not(:first-child) > button { margin: 0; }
+@media (min-width: 761px) { .availability > .heading > div:last-child:not(:first-child) { flex-wrap: nowrap; flex-shrink: 0; } }

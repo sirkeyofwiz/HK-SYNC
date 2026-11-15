@@ -11,6 +11,7 @@ import Database from 'better-sqlite3';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import webpush from 'web-push';
 import { registerStore } from './store.js';
+import { registerAvailability } from './availability.js';
 import { registerLaundry } from './laundry.js';
 import { registerSupport } from './support.js';
 import { registerNotes } from './notes.js';
@@ -1262,6 +1263,10 @@ registerRoomCare(app, { authMiddleware, who: (req) => currentUser(req), reports:
 // Housekeeping store (items, day sheets, occupancy, budgets, consumption reports): see store.js. Hidden until
 // STORE_ENABLED=true is set (Railway variable on the API): its data is kept, but the app shows nothing of it.
 registerStore(app, { database, authMiddleware, findUser: (id) => state.users.find((user) => user.id === id), today: () => dateInAppZone(0), enabled: process.env.STORE_ENABLED === 'true' });
+
+// Store availability (what the store has on the shelf, for supervisors): see availability.js. Separate from the Store
+// above and always on.
+registerAvailability(app, { database, authMiddleware, findUser: (id) => state.users.find((user) => user.id === id), broadcast: () => io.emit('availability:changed') });
 
 // Guest laundry (bags from the room to the laundry and back, laundry shift handovers, reminders): see laundry.js.
 const minutesEnv = (name, fallback) => (Number(process.env[name]) > 0 ? Number(process.env[name]) * 60 * 1000 : fallback);
