@@ -1,7 +1,7 @@
 // Page addresses. The screen on show is written into the address bar (so Back, refresh and shared links work), and an
 // address is turned back into a screen. Addresses:
 //   /                                   Overview
-//   /reports  /tasks  /messages  /laundry  /store  /people  /goals  /account
+//   /reports  /tasks  /messages  /laundry  /stock (store availability)  /store  /people  /goals  /account
 //   /attention                          everything that needs attention
 //   /remarks  /team                     all Overview remarks; team performance (managers)
 //   /review                             contract review (the manager; assistant managers when shared)
@@ -12,7 +12,7 @@
 //   /people/housekeepers/<name>         a housekeeper's profile
 //   /people/supervisors/<id>            a supervisor's profile
 //   …?task=<id>                         a task, open over any page
-export const PAGES = ['overview', 'attention', 'remarks', 'team', 'reports', 'tasks', 'messages', 'laundry', 'store', 'people', 'goals', 'review', 'account'];
+export const PAGES = ['overview', 'attention', 'remarks', 'team', 'reports', 'tasks', 'messages', 'laundry', 'stock', 'store', 'people', 'goals', 'review', 'account'];
 // Pages only managers and assistant managers can open (the server further limits who may see the contract review).
 export const MANAGER_PAGES = ['people', 'goals', 'profile', 'review', 'remarks', 'team'];
 
