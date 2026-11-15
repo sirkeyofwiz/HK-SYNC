@@ -8,10 +8,15 @@
 //   Available      at or above the par level (or no par level set)
 // Supervisors and managers see the list; the store team and managers update it (counts, new items, an Excel import of
 // the monthly stock book, which takes each item's latest closing stock).
+//
+// Reorder alerts: when an item drops below its par level, or runs out, supervisors, store supervisors and managers are
+// told (not the person who made the change). Only the change of state alerts: an item that stays low does not alert
+// again until it has been back at par. An Excel import sends one alert listing every item that newly needs reordering.
 import { randomUUID } from 'node:crypto';
 
 const VIEW_ROLES = ['supervisor', 'manager', 'assistant_manager', 'storekeeper', 'store_supervisor'];
 const EDIT_ROLES = ['manager', 'assistant_manager', 'storekeeper', 'store_supervisor'];
+const ALERT_ROLES = ['supervisor', 'store_supervisor', 'manager', 'assistant_manager'];
 const MAX_QTY = 100000;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -21,7 +26,7 @@ const nameKey = (name) => clean(name).toLowerCase();
 const tidyName = (name) => { const text = clean(name); return text === text.toUpperCase() ? text.charAt(0) + text.slice(1).toLowerCase() : text; };
 const status = (item) => (item.inStock <= 0 ? 'out' : item.par !== null && item.inStock < item.par ? 'low' : 'available');
 
-export function registerAvailability(app, { database, authMiddleware, findUser, broadcast = () => {}, now = () => Date.now() }) {
+export function registerAvailability(app, { database, authMiddleware, findUser, users = () => [], notify = () => null, broadcast = () => {}, now = () => Date.now() }) {
   database.exec('CREATE TABLE IF NOT EXISTS stock_items (id TEXT PRIMARY KEY, data TEXT NOT NULL);');
   const items = new Map(database.prepare('SELECT data FROM stock_items').all().map((row) => JSON.parse(row.data)).map((row) => [row.id, row]));
   const save = (item) => database.prepare('INSERT OR REPLACE INTO stock_items (id, data) VALUES (?, ?)').run(item.id, JSON.stringify(item));
@@ -36,6 +41,25 @@ export function registerAvailability(app, { database, authMiddleware, findUser, 
   const canView = access(VIEW_ROLES, 'Only supervisors, the store team and managers can see store availability.');
   const canEdit = access(EDIT_ROLES, 'Only the store team and managers can update store availability.');
   const shape = (item) => ({ ...item, status: status(item) });
+  // Which items newly need reordering: [{ item, before }] where before is the status before the change ('available' for a new item).
+  const worse = (changes) => changes.filter(({ item, before }) => { const after = status(item); return after !== 'available' && after !== before && !(before === 'out' && after === 'low'); });
+  const recipients = () => users().filter((person) => person.active !== false && ALERT_ROLES.includes(person.role));
+  const left = (item) => (item.inStock <= 0 ? 'none left in the store' : `${item.inStock} left in the store`) + (item.par !== null ? ` (par level ${item.par})` : '');
+  function alertReorder(changes, by) {
+    const list = worse(changes);
+    if (!list.length) return;
+    let title; let body;
+    if (list.length === 1) {
+      const { item } = list[0];
+      title = status(item) === 'out' ? `Out of stock: ${item.name}` : `Reorder: ${item.name}`;
+      body = `${left(item)}. Please reorder.`;
+    } else {
+      const out = list.filter(({ item }) => status(item) === 'out').length;
+      title = `${list.length} store items need reordering${out ? ` (${out} out of stock)` : ''}`;
+      body = list.map(({ item }) => `${item.name} ${item.inStock}${item.par !== null ? `/${item.par}` : ''}`).join(', ');
+    }
+    for (const person of recipients()) notify(person.id, { type: 'stock', fromUserId: by.id, title, body, link: { page: 'stock' } });
+  }
   const list = () => [...items.values()].sort((a, b) => a.category.localeCompare(b.category) || (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name));
 
   // A whole number from 0 up; '' or null for "no par level" where that is allowed.
@@ -62,6 +86,7 @@ export function registerAvailability(app, { database, authMiddleware, findUser, 
     const at = iso();
     const item = { id: randomUUID(), name, category: clean(body.category) || 'Other', inStock: stock.value, par: par.value, order: items.size, createdAt: at, updatedAt: at, updatedByName: req.stockUser.name };
     items.set(item.id, item); save(item); broadcast();
+    alertReorder([{ item, before: 'available' }], req.stockUser);
     return res.status(201).json({ item: shape(item) });
   });
 
@@ -79,8 +104,10 @@ export function registerAvailability(app, { database, authMiddleware, findUser, 
     if ('category' in body) change.category = clean(body.category) || 'Other';
     if ('inStock' in body) { const stock = count(body.inStock); if (stock.error) return res.status(400).json({ message: stock.error }); change.inStock = stock.value; }
     if ('par' in body) { const par = count(body.par, { optional: true }); if (par.error) return res.status(400).json({ message: `Par level: ${par.error}` }); change.par = par.value; }
+    const before = status(item);
     Object.assign(item, change, { updatedAt: iso(), updatedByName: req.stockUser.name });
     save(item); broadcast();
+    alertReorder([{ item, before }], req.stockUser);
     return res.json({ item: shape(item) });
   });
 
@@ -109,14 +136,18 @@ export function registerAvailability(app, { database, authMiddleware, findUser, 
     }
     if (!ready.length) return res.status(400).json({ message: 'No items found in the file.' });
     let added = 0; let updated = 0;
+    const changes = [];
     ready.forEach((row, index) => {
       const existing = [...items.values()].find((item) => nameKey(item.name) === nameKey(row.name));
+      const before = existing ? status(existing) : 'available';
       const item = existing ? Object.assign(existing, row) : { id: randomUUID(), ...row, order: index, createdAt: iso() };
       Object.assign(item, { updatedAt: at, updatedByName: `${req.stockUser.name} (Excel import)` });
       if (existing) updated += 1; else { added += 1; items.set(item.id, item); }
       save(item);
+      changes.push({ item, before });
     });
     broadcast();
+    alertReorder(changes, req.stockUser);
     return res.json({ added, updated, total: items.size });
   });
 }

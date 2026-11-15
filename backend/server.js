@@ -1266,7 +1266,7 @@ registerStore(app, { database, authMiddleware, findUser: (id) => state.users.fin
 
 // Store availability (what the store has on the shelf, for supervisors): see availability.js. Separate from the Store
 // above and always on.
-registerAvailability(app, { database, authMiddleware, findUser: (id) => state.users.find((user) => user.id === id), broadcast: () => io.emit('availability:changed') });
+registerAvailability(app, { database, authMiddleware, findUser: (id) => state.users.find((user) => user.id === id), users: () => state.users, notify: (userId, notification) => notify(userId, notification), broadcast: () => io.emit('availability:changed') });
 
 // Guest laundry (bags from the room to the laundry and back, laundry shift handovers, reminders): see laundry.js.
 const minutesEnv = (name, fallback) => (Number(process.env[name]) > 0 ? Number(process.env[name]) * 60 * 1000 : fallback);
@@ -1933,9 +1933,9 @@ function discussionIndex(userId) {
 // ---------- Notifications ----------
 // Every alert is stored (for the 🔔 list) and pushed to the person's devices unless they have the app open on screen,
 // it's their quiet hours (urgent tasks still come through), or they turned that kind of alert off.
-const NOTIFY_CATEGORY = { message: 'messages', question: 'questions', task: 'tasks', task_reminder: 'tasks', report_signed: 'reportSigned', report_flagged: 'reportFlagged', inspected: 'inspected', handover: 'handovers', reaction: 'reactions', laundry: 'laundry', laundry_reminder: 'laundry' };
+const NOTIFY_CATEGORY = { message: 'messages', question: 'questions', task: 'tasks', task_reminder: 'tasks', report_signed: 'reportSigned', report_flagged: 'reportFlagged', inspected: 'inspected', handover: 'handovers', reaction: 'reactions', laundry: 'laundry', laundry_reminder: 'laundry', stock: 'stock' };
 const DEFAULT_NOTIFY = {
-  categories: { messages: true, questions: true, tasks: true, reportSigned: true, reportFlagged: true, inspected: true, handovers: true, reactions: false, laundry: true },
+  categories: { messages: true, questions: true, tasks: true, reportSigned: true, reportFlagged: true, inspected: true, handovers: true, reactions: false, laundry: true, stock: true },
   quietHours: { enabled: true, start: '22:00', end: '06:00' },
   preview: true,
   sound: true
