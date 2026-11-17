@@ -14,6 +14,10 @@
 // 10 minutes for Express and every hour for Standard. Express rings even in quiet hours; Standard waits for them to end.
 // Managers get one alert when a bag goes past its due time.
 //
+// Step alerts (user's choice, 2026-11-17): a new bag and every step after it (received, washing, ready, with the
+// housekeeper, returned) alert everyone on Guest laundry — laundry staff, supervisors, managers and assistant managers —
+// except the person who did it. On a phone each bag's alerts replace each other, so only its latest step shows.
+//
 // Laundry staff also hand over between shifts (morning → afternoon): the open bags at that moment are kept with the note.
 import { randomUUID } from 'node:crypto';
 
@@ -78,6 +82,9 @@ export function registerLaundry(app, { database, authMiddleware, users, findUser
 
   const recipients = () => users().filter((user) => user.active !== false && REMIND_ROLES.includes(user.role));
   const managers = () => users().filter((user) => user.active !== false && MANAGER_ROLES.includes(user.role));
+  // Everyone on Guest laundry: told about new bags and every step.
+  const everyone = () => users().filter((user) => user.active !== false && LAUNDRY_ROLES.includes(user.role));
+  const STEP_TITLES = { received: 'received', washing: 'washing', ready: 'ready', out: 'out for delivery', returned: 'returned' };
   const bagTitle = (bag) => `Room ${bag.room} · bag ${bag.number}`;
   const link = (bag) => ({ page: 'laundry', id: bag.id });
   const isReminder = (bag) => (notification) => notification.type === 'laundry_reminder' && notification.link?.id === bag.id;
@@ -130,7 +137,7 @@ export function registerLaundry(app, { database, authMiddleware, users, findUser
     bags.set(bag.id, bag);
     saveBag(bag);
     const kind = bag.speed === 'express' ? 'Express' : 'Standard';
-    for (const person of recipients()) {
+    for (const person of everyone()) {
       notify(person.id, { type: 'laundry', fromUserId: user.id, urgent: bag.speed === 'express', title: stage === 'received' ? `New ${kind} bag at the laundry` : `${kind} bag on its way to the laundry`, body: `${bagTitle(bag)} · ${pieces(items)} pieces · ${LAUNDRY_SERVICES[bag.service]} · from ${collectedBy}${bag.dueAt ? ` · due back ${dueText(bag.dueAt)}` : ''}`, link: link(bag) });
     }
     return res.status(201).json({ bag: shape(bag) });
@@ -159,12 +166,12 @@ export function registerLaundry(app, { database, authMiddleware, users, findUser
     bag.status = to;
     bag.history.push({ step: to, at, byId: user.id, byName: user.name, ...(to === 'out' ? { hkName } : {}), ...(clean(req.body?.note, 200) ? { note: clean(req.body.note, 200) } : {}) });
     saveBag(bag);
-    // Ready: supervisors are told straight away so they can send a housekeeper (not only at the next reminder).
-    if (to === 'ready') {
-      const express = bag.speed === 'express';
-      for (const person of users().filter((entry) => entry.active !== false && entry.role === 'supervisor')) {
-        notify(person.id, { type: 'laundry', fromUserId: user.id, urgent: express, title: `${express ? 'Express' : 'Standard'} bag ready · ${bagTitle(bag)}`, body: `${pieces(bag.items)} pieces · ready at the laundry, send a housekeeper to take it to the room · due back ${dueText(bag.dueAt)}`, link: link(bag) });
-      }
+    // Every step tells everyone on Guest laundry (not the person who did it).
+    const express = bag.speed === 'express';
+    const due = to === 'returned' ? '' : ` · due back ${dueText(bag.dueAt)}`;
+    const detail = { received: `received at the laundry by ${user.name}`, washing: `being washed (${user.name})`, ready: 'ready at the laundry, send a housekeeper to take it to the room', out: `handed by ${user.name} to ${bag.deliveredBy} to take to the room`, returned: `back in the guest's room (${user.name})` }[to];
+    for (const person of everyone()) {
+      notify(person.id, { type: 'laundry', fromUserId: user.id, urgent: express, title: `${express ? 'Express' : 'Standard'} bag ${STEP_TITLES[to]} · ${bagTitle(bag)}`, body: `${pieces(bag.items)} pieces · ${detail}${due}`, link: link(bag) });
     }
     return res.json({ bag: shape(bag) });
   });
