@@ -123,3 +123,21 @@ test('only a manager deletes a bag the laundry has received', async () => {
   const list = (await server.call('GET', '/api/laundry', { token: manager })).body.bags;
   assert.ok(!list.some((row) => row.id === received.id));
 });
+
+test('a new bag and every step alert laundry staff, supervisors and managers, never the person who did it', async () => {
+  const titles = async (who) => (await alerts(who)).filter((alert) => alert.type === 'laundry').map((alert) => alert.title);
+  const count = async () => Object.fromEntries(await Promise.all(Object.entries({ laundry, laundry2, supervisor, manager: { token: manager }, driver }).map(async ([name, who]) => [name, (await titles(who)).length])));
+  let before = await count();
+  const grew = async () => { const now = await count(); const diff = Object.fromEntries(Object.keys(now).map((key) => [key, now[key] - before[key]])); before = now; return diff; };
+
+  const id = (await server.call('POST', '/api/laundry/bags', { token: supervisor.token, body: bag({ room: '707' }) })).body.bag.id;
+  assert.deepEqual(await grew(), { laundry: 1, laundry2: 1, supervisor: 0, manager: 1, driver: 0 }, 'new bag: managers told too, not the supervisor who logged it');
+  for (const [to, by, body] of [['received', laundry, {}], ['washing', laundry, {}], ['ready', laundry, {}], ['out', laundry2, { hkName: 'Asha Juma' }], ['returned', supervisor, {}]]) {
+    await server.call('POST', `/api/laundry/bags/${id}/step`, { token: by.token, body: { to, ...body } });
+    const diff = await grew();
+    assert.equal(diff.manager, 1, `${to}: manager told`);
+    assert.equal(diff.driver, 0, `${to}: drivers never`);
+    for (const [name, who] of Object.entries({ laundry, laundry2, supervisor })) assert.equal(diff[name], who === by ? 0 : 1, `${to}: ${name}`);
+  }
+  assert.match((await titles({ token: manager }))[0], /^Standard bag returned · Room 707/);
+});
