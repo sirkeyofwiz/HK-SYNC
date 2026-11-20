@@ -224,6 +224,30 @@ if (!state.goals.length) {
     console.log('Goals: switched to scores calculated from reports (removed typed-in scores and the Public Area table).');
   }
 }
+// Guest review scores (Department targets): the scores the manager reads on Booking.com, ReviewPro and the like, typed in
+// with the date, so the history shows whether they go up or down. Each row has its platform's own scale (out of 5, 10
+// or a %) and an optional target. Three rows to start with; managers add, rename or remove rows themselves.
+const REVIEW_SCALES = [5, 10, 100];
+const REVIEW_MAX_ROWS = 12;
+const REVIEW_MAX_ENTRIES = 400;
+{
+  const goals = state.goals.find((entry) => entry.id === 'current');
+  if (goals && !Array.isArray(goals.reviewScores)) {
+    goals.reviewScores = [
+      { key: 'booking_overall', label: 'Booking.com – Overall', scale: 10, target: null, entries: [] },
+      { key: 'booking_cleanliness', label: 'Booking.com – Cleanliness', scale: 10, target: null, entries: [] },
+      { key: 'reviewpro_gri', label: 'ReviewPro – GRI', scale: 100, target: null, entries: [] }
+    ];
+    saveRow('goals', goals);
+  }
+}
+const byEntryDate = (a, b) => String(a.date).localeCompare(String(b.date)) || String(a.at).localeCompare(String(b.at));
+function reviewScoresResponse(goals) {
+  return (goals.reviewScores || []).map(({ entries = [], ...row }) => {
+    const sorted = [...entries].sort(byEntryDate);
+    return { ...row, latest: sorted.at(-1) || null, previous: sorted.at(-2) || null, entries: sorted.slice(-60) };
+  });
+}
 
 // The goals year runs 1 October – 30 September and rolls over by itself on 1 October (hotel time):
 // points and averages start again from zero each year, and earlier years stay viewable.
@@ -410,7 +434,8 @@ function goalsResponse(period = goalPeriod()) {
     id: goals.id, updatedAt: goals.updatedAt, updatedBy: goals.updatedBy,
     year: period.label, startYear: period.startYear, current: period.current, years: goalYears(),
     targets: pointsTargets(period), smartGoals, hkProgress,
-    supervisorPoints: supervisorPoints(period), hkPoints: hkPoints(goals.hkProgress, period)
+    supervisorPoints: supervisorPoints(period), hkPoints: hkPoints(goals.hkProgress, period),
+    reviewScores: reviewScoresResponse(goals)
   };
 }
 
@@ -1527,6 +1552,59 @@ function supervisorPerformance(since, until = dateInAppZone(0)) {
 app.get('/api/goals', authMiddleware, requireManager, (req, res) => {
   const year = Number(req.query.year);
   return res.json({ goals: goalsResponse(goalYears().includes(year) ? goalPeriod(year) : goalPeriod()) });
+});
+
+// Guest review scores: managers set the rows (name, scale, target) and type in each score they read, with its date.
+const reviewScoreKey = (label) => `${String(label).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40) || 'score'}_${randomUUID().slice(0, 6)}`;
+const reviewNumber = (value) => (value === '' || value === null || value === undefined ? null : Number(value));
+const reviewRow = (key) => state.goals.find((entry) => entry.id === 'current')?.reviewScores?.find((row) => row.key === key);
+app.put('/api/goals/review-scores', authMiddleware, requireManager, (req, res) => {
+  const goals = state.goals.find((entry) => entry.id === 'current');
+  const rows = req.body?.rows;
+  if (!Array.isArray(rows)) return res.status(400).json({ message: 'rows must be a list.' });
+  if (rows.length > REVIEW_MAX_ROWS) return res.status(400).json({ message: `Up to ${REVIEW_MAX_ROWS} review scores.` });
+  const next = [];
+  for (const row of rows) {
+    const label = cleanName(row?.label);
+    if (!label) return res.status(400).json({ message: 'Every review score needs a name, e.g. "Booking.com – Cleanliness".' });
+    const scale = Number(row?.scale);
+    if (!REVIEW_SCALES.includes(scale)) return res.status(400).json({ message: `${label}: choose out of 5, out of 10 or a %.` });
+    const target = reviewNumber(row?.target);
+    if (target !== null && !(Number.isFinite(target) && target > 0 && target <= scale)) return res.status(400).json({ message: `${label}: the target must be between 0 and ${scale}.` });
+    if (next.some((other) => other.label.toLowerCase() === label.toLowerCase())) return res.status(400).json({ message: `"${label}" is listed twice.` });
+    const existing = goals.reviewScores.find((entry) => entry.key === row?.key);
+    // Changing the scale would make earlier scores meaningless, so a row with scores keeps its scale.
+    if (existing && existing.entries.length && existing.scale !== scale) return res.status(400).json({ message: `${label} already has scores, so its scale can't change. Add a new row instead.` });
+    next.push({ key: existing?.key || reviewScoreKey(label), label, scale, target: target === null ? null : Math.round(target * 100) / 100, entries: existing?.entries || [] });
+  }
+  goals.reviewScores = next;
+  goals.updatedAt = new Date().toISOString();
+  goals.updatedBy = req.currentUser.name;
+  saveRow('goals', goals);
+  return res.json({ reviewScores: reviewScoresResponse(goals) });
+});
+app.post('/api/goals/review-scores/:key/entries', authMiddleware, requireManager, (req, res) => {
+  const row = reviewRow(req.params.key);
+  if (!row) return res.status(404).json({ message: 'That review score was not found.' });
+  const date = String(req.body?.date || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`)) || new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date) return res.status(400).json({ message: 'Choose the date you read the score.' });
+  if (date > dateInAppZone(0)) return res.status(400).json({ message: "The date can't be in the future." });
+  const score = reviewNumber(req.body?.score);
+  if (score === null || !Number.isFinite(score) || score < 0 || score > row.scale) return res.status(400).json({ message: `Enter a score from 0 to ${row.scale}.` });
+  if (row.entries.length >= REVIEW_MAX_ENTRIES) return res.status(400).json({ message: 'This review score has too many entries. Delete some old ones first.' });
+  row.entries.push({ id: randomUUID(), date, score: Math.round(score * 100) / 100, note: String(req.body?.note || '').trim().slice(0, 200), byId: req.currentUser.id, by: req.currentUser.name, at: new Date().toISOString() });
+  const goals = state.goals.find((entry) => entry.id === 'current');
+  saveRow('goals', goals);
+  return res.status(201).json({ reviewScores: reviewScoresResponse(goals) });
+});
+app.delete('/api/goals/review-scores/:key/entries/:id', authMiddleware, requireManager, (req, res) => {
+  const row = reviewRow(req.params.key);
+  const index = row ? row.entries.findIndex((entry) => entry.id === req.params.id) : -1;
+  if (index < 0) return res.status(404).json({ message: 'That score was not found.' });
+  row.entries.splice(index, 1);
+  const goals = state.goals.find((entry) => entry.id === 'current');
+  saveRow('goals', goals);
+  return res.json({ reviewScores: reviewScoresResponse(goals) });
 });
 
 // Saves SMART targets and roster names only; every score is calculated on read.
