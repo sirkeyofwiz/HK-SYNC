@@ -1763,17 +1763,28 @@ app.patch('/api/tasks/:id/status', authMiddleware, (req, res) => {
   if (previous !== status) {
     const actor = userName(req.user.id);
     const link = { page: 'task', id: task.id };
+    // Who has already been told, so a completed task reaches each manager once (below).
+    const told = new Set([req.user.id]);
+    const tell = (userId, notification) => { if (!userId || told.has(userId)) return; told.add(userId); notify(userId, notification); };
     // The assignee's progress goes to whoever created the task; a manager's change goes to the assignee.
     const covering = req.user.id !== task.assignedTo && supervisorsTask(currentUser(req), task);
     if (covering) {
       // A supervisor covering a colleague's task: tell the colleague and whoever created the task.
       const verb = { completed: 'completed', in_progress: 'started', pending: 'moved back to pending' }[status];
-      notify(task.assignedTo, { type: 'task', fromUserId: req.user.id, title: `${actor} ${verb} your task`, body: task.title, link });
-      if (task.assignedBy !== task.assignedTo) notify(task.assignedBy, { type: 'task', fromUserId: req.user.id, title: `${actor} ${verb} a task for ${userName(task.assignedTo)}`, body: task.title, link });
+      tell(task.assignedTo, { type: 'task', fromUserId: req.user.id, title: `${actor} ${verb} your task`, body: task.title, link });
+      if (task.assignedBy !== task.assignedTo) tell(task.assignedBy, { type: 'task', fromUserId: req.user.id, title: `${actor} ${verb} a task for ${userName(task.assignedTo)}`, body: task.title, link });
     } else if (req.user.id === task.assignedTo) {
-      notify(task.assignedBy, { type: 'task', fromUserId: req.user.id, title: `${actor} ${{ completed: 'completed', in_progress: 'started', pending: 'moved back to pending' }[status]}`, body: task.title, link });
+      tell(task.assignedBy, { type: 'task', fromUserId: req.user.id, title: `${actor} ${{ completed: 'completed', in_progress: 'started', pending: 'moved back to pending' }[status]}`, body: task.title, link });
     } else if (task.assignedTo) {
-      notify(task.assignedTo, { type: 'task', fromUserId: req.user.id, title: previous === 'completed' ? 'Task reopened' : status === 'completed' ? 'Task marked completed' : status === 'in_progress' ? 'Task in progress' : 'Task moved back to pending', body: `${task.title} · by ${actor}`, link });
+      tell(task.assignedTo, { type: 'task', fromUserId: req.user.id, title: previous === 'completed' ? 'Task reopened' : status === 'completed' ? 'Task marked completed' : status === 'in_progress' ? 'Task in progress' : 'Task moved back to pending', body: `${task.title} · by ${actor}`, link });
+    }
+    // A completed task also reaches the manager and every assistant manager, whoever created it (user's choice,
+    // 2026-11-20). Started / moved back still go only to the people above.
+    if (status === 'completed') {
+      const forWhom = task.assignedTo && task.assignedTo !== req.user.id ? ` for ${userName(task.assignedTo)}` : '';
+      for (const manager of state.users.filter((user) => user.active !== false && ['manager', 'assistant_manager'].includes(user.role))) {
+        tell(manager.id, { type: 'task', fromUserId: req.user.id, title: `${actor} completed a task${forWhom}`, body: task.title, link });
+      }
     }
   }
   return res.json({ task });
