@@ -79,3 +79,27 @@ test('supervisors: remarks managers write on Inspection Rate Program rooms', asy
   assert.ok(bathroom.people.every((person) => [supervisor.user.id, supervisor2.user.id].includes(person.ref)), 'supervisors are known by their account');
   assert.equal(body.topics.find((topic) => topic.id === 'sup_maintenance').times, 2);
 });
+
+test('a planned training is one row: edit it for everyone, remove one person, or delete it all', async () => {
+  const people = HK.slice(0, 3).map((name) => ({ name, ref: name }));
+  await server.call('POST', '/api/training-plans', { token: manager, body: { audience: 'hk', topicId: 'hair', people, date: hotelDate(5), followUp: hotelDate(35), notes: 'Briefing room' } });
+  const list = async () => (await server.call('GET', '/api/training-plans?audience=hk', { token: manager })).body.plans;
+  const plan = (await list()).find((row) => row.topic === 'Hair & detail check');
+  assert.equal(plan.people.length, 3);
+  assert.equal(plan.notes, 'Briefing room');
+  assert.ok((await list()).some((row) => row.topic === 'Dusting high & low areas' && row.people.length === 3), 'the earlier training is its own row');
+
+  const edited = await server.call('PATCH', `/api/training-plans/${encodeURIComponent(plan.id)}`, { token: manager, body: { audience: 'hk', date: hotelDate(6), notes: 'Moved to Thursday', status: 'improved' } });
+  assert.equal(edited.status, 200);
+  assert.deepEqual([edited.body.plan.date, edited.body.plan.notes, edited.body.plan.status], [hotelDate(6), 'Moved to Thursday', 'improved']);
+  const onProfile = (await server.call('GET', `/api/support-actions?kind=hk&ref=${encodeURIComponent(HK[1])}`, { token: manager })).body.actions.find((row) => row.problem === 'Training: Hair & detail check');
+  assert.deepEqual([onProfile.date, onProfile.notes, onProfile.status], [hotelDate(6), 'Moved to Thursday', 'improved'], 'the profile shows the change');
+
+  assert.equal((await server.call('DELETE', `/api/support-actions/${plan.people[0].actionId}`, { token: manager })).status, 200, 'remove one person');
+  assert.equal((await list()).find((row) => row.id === plan.id).people.length, 2);
+
+  const deleted = await server.call('DELETE', `/api/training-plans/${encodeURIComponent(plan.id)}?audience=hk`, { token: manager });
+  assert.equal(deleted.body.deleted, 2);
+  assert.ok(!(await list()).some((row) => row.id === plan.id));
+  assert.equal((await server.call('GET', '/api/training-plans?audience=hk', { token: supervisor.token })).status, 403);
+});

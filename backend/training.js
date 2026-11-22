@@ -148,11 +148,66 @@ export function registerTraining(app, { database, authMiddleware, requireManager
     const date = String(req.body?.date || '');
     if (!DATE.test(date)) return res.status(400).json({ message: 'Choose the training date.' });
     const created = [];
+    const planId = randomUUID();
     for (const person of chosen) {
-      const result = support.addAction(audience, person?.ref, person?.name, { date, action: 'Training', problem: `Training: ${topic.label}`, notes: req.body?.notes || '', followUp: req.body?.followUp || null, status: 'in_progress' }, req.currentUser.id);
+      const result = support.addAction(audience, person?.ref, person?.name, { date, action: 'Training', problem: `Training: ${topic.label}`, notes: req.body?.notes || '', followUp: req.body?.followUp || null, status: 'in_progress' }, req.currentUser.id, { planId });
       if (result.error) return res.status(400).json({ message: created.length ? `${result.error} (${created.length} already added)` : result.error });
       created.push(result.action);
     }
     return res.status(201).json({ created: created.length });
+  });
+
+  // Planned trainings, one row per training: the Training actions made together (same planId). Trainings planned before
+  // planId existed are grouped by topic, date, who planned them and the minute they were saved.
+  const planKey = (action) => action.planId || `old:${action.problem}|${action.date}|${action.createdBy}|${String(action.createdAt).slice(0, 16)}`;
+  const plansOf = (audience) => {
+    const groups = new Map();
+    for (const action of support.actionsOf(audience).filter((row) => row.action === 'Training')) {
+      const key = planKey(action);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(action);
+    }
+    return groups;
+  };
+  const planView = (key, rows) => {
+    const first = rows[0];
+    const statuses = [...new Set(rows.map((row) => row.status))];
+    return {
+      id: key, topic: String(first.problem).replace(/^Training: /, ''), date: first.date, followUp: first.followUp || null, notes: first.notes || '',
+      status: statuses.length === 1 ? statuses[0] : 'mixed', by: support.view(first).byName, createdAt: first.createdAt,
+      people: rows.map((row) => ({ actionId: row.id, name: row.name, ref: row.person.slice(row.person.indexOf(':') + 1), status: row.status })).sort((a, b) => a.name.localeCompare(b.name))
+    };
+  };
+  const audienceOf = (value) => (AUDIENCES.includes(value) ? value : null);
+
+  app.get('/api/training-plans', authMiddleware, requireManager, (req, res) => {
+    const audience = audienceOf(req.query.audience);
+    if (!audience) return res.status(400).json({ message: 'Choose housekeepers or supervisors.' });
+    const plans = [...plansOf(audience).entries()].map(([key, rows]) => planView(key, rows))
+      .sort((a, b) => b.date.localeCompare(a.date) || String(b.createdAt).localeCompare(String(a.createdAt)));
+    return res.json({ plans });
+  });
+
+  // Change a whole training at once: date, follow-up date, notes, and (optionally) how it turned out for everyone.
+  app.patch('/api/training-plans/:id', authMiddleware, requireManager, (req, res) => {
+    const audience = audienceOf(req.body?.audience);
+    const rows = audience ? plansOf(audience).get(req.params.id) : null;
+    if (!rows) return res.status(404).json({ message: 'That training was not found.' });
+    const body = {};
+    for (const field of ['date', 'followUp', 'notes', 'status']) if (req.body?.[field] !== undefined) body[field] = req.body[field];
+    for (const row of rows) {
+      const result = support.updateAction(row.id, body, req.currentUser.id);
+      if (result.error) return res.status(400).json({ message: result.error });
+    }
+    return res.json({ plan: planView(req.params.id, support.actionsOf(audience).filter((row) => planKey(row) === req.params.id)) });
+  });
+
+  // Delete a whole training: its Training action comes off every person's support plan.
+  app.delete('/api/training-plans/:id', authMiddleware, requireManager, (req, res) => {
+    const audience = audienceOf(req.query.audience);
+    const rows = audience ? plansOf(audience).get(req.params.id) : null;
+    if (!rows) return res.status(404).json({ message: 'That training was not found.' });
+    for (const row of rows) support.removeAction(row.id);
+    return res.json({ deleted: rows.length });
   });
 }
