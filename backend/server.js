@@ -224,29 +224,32 @@ if (!state.goals.length) {
     console.log('Goals: switched to scores calculated from reports (removed typed-in scores and the Public Area table).');
   }
 }
-// Guest review scores (Department targets): the scores the manager reads on Booking.com, ReviewPro and the like, typed in
-// with the date, so the history shows whether they go up or down. Each row has its platform's own scale (out of 5, 10
-// or a %) and an optional target. Three rows to start with; managers add, rename or remove rows themselves.
-const REVIEW_SCALES = [5, 10, 100];
-const REVIEW_MAX_ROWS = 12;
-const REVIEW_MAX_ENTRIES = 400;
+// ReviewPro guest ratings (Department targets): how guests rate housekeeping on ReviewPro, as a %, for the same four
+// categories as the SMART goals (Cleaning Level, Hygiene Standard, Organization Supplies, Guest Interaction). The manager
+// checks ReviewPro often and types in the % he reads for any of the four, with the date; every update is kept for the
+// trend. Each category also has a guest target % (saved with the SMART targets). User's choice, 2026-11-22.
+// The earlier free rows (Booking.com, ReviewPro GRI) were dropped; any scores typed into them are kept as
+// retiredReviewScores, not shown.
+const GUEST_RATING_MAX_ENTRIES = 1000;
 {
   const goals = state.goals.find((entry) => entry.id === 'current');
-  if (goals && !Array.isArray(goals.reviewScores)) {
-    goals.reviewScores = [
-      { key: 'booking_overall', label: 'Booking.com – Overall', scale: 10, target: null, entries: [] },
-      { key: 'booking_cleanliness', label: 'Booking.com – Cleanliness', scale: 10, target: null, entries: [] },
-      { key: 'reviewpro_gri', label: 'ReviewPro – GRI', scale: 100, target: null, entries: [] }
-    ];
-    saveRow('goals', goals);
+  if (goals) {
+    let changed = false;
+    if (Array.isArray(goals.reviewScores)) {
+      if (goals.reviewScores.some((row) => row.entries?.length)) goals.retiredReviewScores = goals.reviewScores;
+      delete goals.reviewScores;
+      changed = true;
+    }
+    if (!Array.isArray(goals.guestRatings)) { goals.guestRatings = []; changed = true; }
+    if (changed) saveRow('goals', goals);
   }
 }
-const byEntryDate = (a, b) => String(a.date).localeCompare(String(b.date)) || String(a.at).localeCompare(String(b.at));
-function reviewScoresResponse(goals) {
-  return (goals.reviewScores || []).map(({ entries = [], ...row }) => {
-    const sorted = [...entries].sort(byEntryDate);
-    return { ...row, latest: sorted.at(-1) || null, previous: sorted.at(-2) || null, entries: sorted.slice(-60) };
-  });
+const byRatingDate = (a, b) => String(a.date).localeCompare(String(b.date)) || String(a.at).localeCompare(String(b.at));
+// For one category: its updates oldest first, then the latest, the one before, and the last 12 for the trend line.
+function guestRatingFor(goals, key) {
+  const updates = (goals.guestRatings || []).filter((entry) => Number.isFinite(entry.scores?.[key])).sort(byRatingDate)
+    .map((entry) => ({ id: entry.id, date: entry.date, score: entry.scores[key], by: entry.by }));
+  return { latest: updates.at(-1) || null, previous: updates.at(-2) || null, history: updates.slice(-12), count: updates.length };
 }
 
 // The goals year runs 1 October – 30 September and rolls over by itself on 1 October (hotel time):
@@ -429,13 +432,13 @@ function goalsResponse(period = goalPeriod()) {
     }
     const values = team[SMART_SOURCES[goal.key]] || [];
     return { ...goal, rate: values.length ? Math.round(average(values) * 10) : 0, samples: values.length };
-  });
+  }).map((goal) => ({ ...goal, guestTarget: goal.guestTarget ?? null, guest: guestRatingFor(goals, goal.key) }));
   return {
     id: goals.id, updatedAt: goals.updatedAt, updatedBy: goals.updatedBy,
     year: period.label, startYear: period.startYear, current: period.current, years: goalYears(),
     targets: pointsTargets(period), smartGoals, hkProgress,
     supervisorPoints: supervisorPoints(period), hkPoints: hkPoints(goals.hkProgress, period),
-    reviewScores: reviewScoresResponse(goals)
+    guestRatings: [...(goals.guestRatings || [])].sort(byRatingDate).reverse().slice(0, 100)
   };
 }
 
@@ -443,7 +446,11 @@ const percent = (value) => Math.min(100, Math.max(0, Math.round(Number(value) ||
 const cleanName = (value) => String(value || '').trim().slice(0, 80);
 // Only what managers may set: SMART targets (only for goals that already exist) and roster names.
 const GOALS_SHAPE = {
-  smartGoals: (rows, goals) => goals.smartGoals.map((goal) => ({ ...goal, target: percent(rows.find((row) => row?.key === goal.key)?.target ?? goal.target) })),
+  smartGoals: (rows, goals) => goals.smartGoals.map((goal) => {
+    const row = rows.find((entry) => entry?.key === goal.key);
+    const guest = row && 'guestTarget' in row ? row.guestTarget : goal.guestTarget;
+    return { ...goal, target: percent(row?.target ?? goal.target), guestTarget: guest === '' || guest === null || guest === undefined || !Number(guest) ? null : percent(guest) };
+  }),
   hkProgress: (rows) => rows.map((row) => ({ name: cleanName(row.name) }))
 };
 
@@ -1554,57 +1561,33 @@ app.get('/api/goals', authMiddleware, requireManager, (req, res) => {
   return res.json({ goals: goalsResponse(goalYears().includes(year) ? goalPeriod(year) : goalPeriod()) });
 });
 
-// Guest review scores: managers set the rows (name, scale, target) and type in each score they read, with its date.
-const reviewScoreKey = (label) => `${String(label).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40) || 'score'}_${randomUUID().slice(0, 6)}`;
-const reviewNumber = (value) => (value === '' || value === null || value === undefined ? null : Number(value));
-const reviewRow = (key) => state.goals.find((entry) => entry.id === 'current')?.reviewScores?.find((row) => row.key === key);
-app.put('/api/goals/review-scores', authMiddleware, requireManager, (req, res) => {
+// ReviewPro guest ratings: one update = the date the manager read ReviewPro and the % for any of the four categories.
+const ratingPercent = (value) => (value === '' || value === null || value === undefined ? null : Number(value));
+app.post('/api/goals/guest-ratings', authMiddleware, requireManager, (req, res) => {
   const goals = state.goals.find((entry) => entry.id === 'current');
-  const rows = req.body?.rows;
-  if (!Array.isArray(rows)) return res.status(400).json({ message: 'rows must be a list.' });
-  if (rows.length > REVIEW_MAX_ROWS) return res.status(400).json({ message: `Up to ${REVIEW_MAX_ROWS} review scores.` });
-  const next = [];
-  for (const row of rows) {
-    const label = cleanName(row?.label);
-    if (!label) return res.status(400).json({ message: 'Every review score needs a name, e.g. "Booking.com – Cleanliness".' });
-    const scale = Number(row?.scale);
-    if (!REVIEW_SCALES.includes(scale)) return res.status(400).json({ message: `${label}: choose out of 5, out of 10 or a %.` });
-    const target = reviewNumber(row?.target);
-    if (target !== null && !(Number.isFinite(target) && target > 0 && target <= scale)) return res.status(400).json({ message: `${label}: the target must be between 0 and ${scale}.` });
-    if (next.some((other) => other.label.toLowerCase() === label.toLowerCase())) return res.status(400).json({ message: `"${label}" is listed twice.` });
-    const existing = goals.reviewScores.find((entry) => entry.key === row?.key);
-    // Changing the scale would make earlier scores meaningless, so a row with scores keeps its scale.
-    if (existing && existing.entries.length && existing.scale !== scale) return res.status(400).json({ message: `${label} already has scores, so its scale can't change. Add a new row instead.` });
-    next.push({ key: existing?.key || reviewScoreKey(label), label, scale, target: target === null ? null : Math.round(target * 100) / 100, entries: existing?.entries || [] });
-  }
-  goals.reviewScores = next;
-  goals.updatedAt = new Date().toISOString();
-  goals.updatedBy = req.currentUser.name;
-  saveRow('goals', goals);
-  return res.json({ reviewScores: reviewScoresResponse(goals) });
-});
-app.post('/api/goals/review-scores/:key/entries', authMiddleware, requireManager, (req, res) => {
-  const row = reviewRow(req.params.key);
-  if (!row) return res.status(404).json({ message: 'That review score was not found.' });
   const date = String(req.body?.date || '');
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`)) || new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date) return res.status(400).json({ message: 'Choose the date you read the score.' });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`)) || new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date) return res.status(400).json({ message: 'Choose the date you read ReviewPro.' });
   if (date > dateInAppZone(0)) return res.status(400).json({ message: "The date can't be in the future." });
-  const score = reviewNumber(req.body?.score);
-  if (score === null || !Number.isFinite(score) || score < 0 || score > row.scale) return res.status(400).json({ message: `Enter a score from 0 to ${row.scale}.` });
-  if (row.entries.length >= REVIEW_MAX_ENTRIES) return res.status(400).json({ message: 'This review score has too many entries. Delete some old ones first.' });
-  row.entries.push({ id: randomUUID(), date, score: Math.round(score * 100) / 100, note: String(req.body?.note || '').trim().slice(0, 200), byId: req.currentUser.id, by: req.currentUser.name, at: new Date().toISOString() });
-  const goals = state.goals.find((entry) => entry.id === 'current');
+  const scores = {};
+  for (const goal of goals.smartGoals) {
+    const value = ratingPercent(req.body?.scores?.[goal.key]);
+    if (value === null) continue;
+    if (!Number.isFinite(value) || value < 0 || value > 100) return res.status(400).json({ message: `${goal.label}: enter a % from 0 to 100.` });
+    scores[goal.key] = Math.round(value * 10) / 10;
+  }
+  if (!Object.keys(scores).length) return res.status(400).json({ message: 'Enter the ReviewPro % for at least one category.' });
+  if (goals.guestRatings.length >= GUEST_RATING_MAX_ENTRIES) return res.status(400).json({ message: 'Too many ReviewPro updates are saved. Delete some old ones first.' });
+  goals.guestRatings.push({ id: randomUUID(), date, scores, note: String(req.body?.note || '').trim().slice(0, 200), byId: req.currentUser.id, by: req.currentUser.name, at: new Date().toISOString() });
   saveRow('goals', goals);
-  return res.status(201).json({ reviewScores: reviewScoresResponse(goals) });
+  return res.status(201).json({ goals: goalsResponse() });
 });
-app.delete('/api/goals/review-scores/:key/entries/:id', authMiddleware, requireManager, (req, res) => {
-  const row = reviewRow(req.params.key);
-  const index = row ? row.entries.findIndex((entry) => entry.id === req.params.id) : -1;
-  if (index < 0) return res.status(404).json({ message: 'That score was not found.' });
-  row.entries.splice(index, 1);
+app.delete('/api/goals/guest-ratings/:id', authMiddleware, requireManager, (req, res) => {
   const goals = state.goals.find((entry) => entry.id === 'current');
+  const index = goals.guestRatings.findIndex((entry) => entry.id === req.params.id);
+  if (index < 0) return res.status(404).json({ message: 'That update was not found.' });
+  goals.guestRatings.splice(index, 1);
   saveRow('goals', goals);
-  return res.json({ reviewScores: reviewScoresResponse(goals) });
+  return res.json({ goals: goalsResponse() });
 });
 
 // Saves SMART targets and roster names only; every score is calculated on read.
