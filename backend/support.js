@@ -21,9 +21,10 @@ export function registerSupport(app, { database, authMiddleware, requireManager,
   // The fields a manager sets; `existing` keeps what isn't sent.
   const read = (body, existing = {}) => {
     const date = body.date ?? existing.date;
-    if (!isDate(date) || date > today()) return { error: 'Choose today or an earlier date.' };
     const action = body.action ?? existing.action;
     if (!SUPPORT_ACTIONS.includes(action)) return { error: 'Choose what was done.' };
+    // A training can be planned ahead; everything else records something already done.
+    if (!isDate(date) || (date > today() && action !== 'Training')) return { error: action === 'Training' ? 'Choose the training date.' : 'Choose today or an earlier date.' };
     const problem = clean(body.problem ?? existing.problem, 200);
     if (!problem) return { error: 'Say what the action was for.' };
     const followUp = body.followUp === undefined ? existing.followUp ?? null : body.followUp || null;
@@ -68,6 +69,18 @@ export function registerSupport(app, { database, authMiddleware, requireManager,
   });
 
   return {
+    // Training planned from the Training suggestions page: one support action per person, like one added on a profile.
+    addAction(kind, ref, name, body, userId) {
+      if (!['hk', 'sup'].includes(kind) || !clean(ref, 120)) return { error: 'Choose a housekeeper or supervisor.' };
+      const { fields, error } = read(body || {});
+      if (error) return { error };
+      const row = { id: randomUUID(), person: personKey(kind, ref), kind, name: clean(name || ref, 120), ...fields, createdAt: new Date().toISOString(), createdBy: userId };
+      actions.set(row.id, row); save(row);
+      return { action: view(row) };
+    },
+    // Every action of one kind (hk or sup), for the Training suggestions page to show what is already planned.
+    actionsOf(kind) { return [...actions.values()].filter((row) => row.kind === kind); },
+    personKey,
     // A housekeeper renamed on Goals (with "update past reports") keeps their support history.
     renameHousekeeper(fromName, toName) {
       const from = personKey('hk', fromName);

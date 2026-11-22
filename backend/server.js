@@ -14,6 +14,7 @@ import { registerStore } from './store.js';
 import { registerAvailability } from './availability.js';
 import { registerLaundry } from './laundry.js';
 import { registerSupport } from './support.js';
+import { registerTraining } from './training.js';
 import { registerNotes } from './notes.js';
 import { prepareRoomCare, registerRoomCare, ROOM_CARE } from './roomcare.js';
 import { backupConfigured, runBackup, listSnapshots, databaseSnapshot, restoreIfRequested, describeError, DAILY_KEEP, MONTHLY_KEEP } from './backup.js';
@@ -1274,6 +1275,39 @@ const currentRoster = () => state.goals.find((entry) => entry.id === 'current').
 // Names only, for the "HK name" suggestions on report forms (supervisors fill those but can't open Goals).
 // Support plan on profiles: what managers did to help someone who needs attention, and how it turned out. See support.js.
 const support = registerSupport(app, { database, authMiddleware, requireManager, userName: (id) => userName(id), today: () => dateInAppZone(0) });
+// Training suggestions: problems that repeat in inspection remarks, counted across the team (see training.js).
+// Housekeepers: remarks supervisors write on their rooms, trolleys, pantries and guest checks. Supervisors: remarks
+// managers write on Inspection Rate Program rooms.
+const TRAINING_HK_TYPES = ['quality', 'neglected', 'trolley_pantry', 'guest_interaction'];
+function trainingRemarks(audience, since, until) {
+  const out = [];
+  for (const report of state.reports) {
+    if (report.voided || String(report.date) < since || String(report.date) > until) continue;
+    if (audience === 'hk' && TRAINING_HK_TYPES.includes(report.type)) {
+      for (const line of profileLines(report)) {
+        const text = String(line.entry?.remarks || '').trim();
+        if (!text) continue;
+        const name = String(line.entry?.hkName || '').trim() || 'No name given';
+        out.push({ text, date: report.date, personKey: nameKey(name), personName: name, ref: name, place: line.place || report.data?.block || report.data?.area || '', type: report.type, by: userName(report.submittedBy), reportId: report.id, line: { list: line.list, index: line.index } });
+      }
+    } else if (audience === 'sup' && report.type === 'inspection_rate') {
+      const list = Array.isArray(report.data?.entries) ? report.data.entries : [];
+      list.forEach((entry, index) => {
+        const text = String(entry?.remarks || '').trim();
+        if (!text) return;
+        const id = report.data?.supervisorId || '';
+        const name = report.data?.supervisorName || userName(id);
+        out.push({ text, date: report.date, personKey: id || nameKey(name), personName: name, ref: id || name, place: entry.room ? `Room ${entry.room}` : '', type: report.type, by: userName(report.submittedBy), reportId: report.id, line: { list: 'entries', index } });
+      });
+    }
+  }
+  return out.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+}
+registerTraining(app, {
+  database, authMiddleware, requireManager, support, today: () => dateInAppZone(0),
+  remarks: trainingRemarks,
+  people: (audience) => (audience === 'hk' ? currentRoster().map((row) => row.name) : activeSupervisors().map((user) => user.name))
+});
 
 // Notes for the manager on a report or task, written by whoever can open it. See notes.js.
 const notes = registerNotes(app, {
