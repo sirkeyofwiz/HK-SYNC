@@ -12,9 +12,9 @@
 //   /people/housekeepers/<name>         a housekeeper's profile
 //   /people/supervisors/<id>            a supervisor's profile
 //   …?task=<id>                         a task, open over any page
-export const PAGES = ['overview', 'attention', 'remarks', 'team', 'reports', 'tasks', 'messages', 'laundry', 'stock', 'store', 'people', 'goals', 'review', 'account'];
+export const PAGES = ['overview', 'attention', 'remarks', 'team', 'reports', 'tasks', 'messages', 'laundry', 'stock', 'store', 'people', 'goals', 'training', 'review', 'account'];
 // Pages only managers and assistant managers can open (the server further limits who may see the contract review).
-export const MANAGER_PAGES = ['people', 'goals', 'profile', 'review', 'remarks', 'team'];
+export const MANAGER_PAGES = ['people', 'goals', 'training', 'profile', 'review', 'remarks', 'team'];
 
 const part = (value) => encodeURIComponent(String(value));
 
