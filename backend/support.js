@@ -70,14 +70,30 @@ export function registerSupport(app, { database, authMiddleware, requireManager,
 
   return {
     // Training planned from the Training suggestions page: one support action per person, like one added on a profile.
-    addAction(kind, ref, name, body, userId) {
+    addAction(kind, ref, name, body, userId, extra = {}) {
       if (!['hk', 'sup'].includes(kind) || !clean(ref, 120)) return { error: 'Choose a housekeeper or supervisor.' };
       const { fields, error } = read(body || {});
       if (error) return { error };
-      const row = { id: randomUUID(), person: personKey(kind, ref), kind, name: clean(name || ref, 120), ...fields, createdAt: new Date().toISOString(), createdBy: userId };
+      const row = { id: randomUUID(), person: personKey(kind, ref), kind, name: clean(name || ref, 120), ...fields, ...(extra.planId ? { planId: extra.planId } : {}), createdAt: new Date().toISOString(), createdBy: userId };
       actions.set(row.id, row); save(row);
       return { action: view(row) };
     },
+    // Change or delete one action (the Training page edits a whole planned training through these).
+    updateAction(id, body, userId) {
+      const existing = actions.get(id);
+      if (!existing) return { error: 'Action not found.' };
+      const { fields, error } = read(body || {}, existing);
+      if (error) return { error };
+      const row = { ...existing, ...fields, updatedAt: new Date().toISOString(), updatedBy: userId };
+      actions.set(row.id, row); save(row);
+      return { action: view(row) };
+    },
+    removeAction(id) {
+      if (!actions.delete(id)) return false;
+      database.prepare('DELETE FROM support_actions WHERE id = ?').run(id);
+      return true;
+    },
+    view,
     // Every action of one kind (hk or sup), for the Training suggestions page to show what is already planned.
     actionsOf(kind) { return [...actions.values()].filter((row) => row.kind === kind); },
     personKey,

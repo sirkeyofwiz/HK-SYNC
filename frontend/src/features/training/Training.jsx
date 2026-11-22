@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Empty } from '../../components/ui';
 import { Icon } from '../../components/icons';
+import { PlannedTrainings } from './PlannedTrainings';
 import { TYPES } from '../../lib/constants';
 import { deadlineLabel, localToday, plural } from '../../lib/format';
 
@@ -93,8 +94,11 @@ export function Training({ request, openProfile, openSupervisor, openReport, set
   const [error, setError] = useState('');
   const [editing, setEditing] = useState(false);
   const [showOthers, setShowOthers] = useState(false);
-  const load = () => request(`/training-suggestions?audience=${audience}&days=${days}&minTimes=${limits.minTimes}&minPeople=${limits.minPeople}`).then((result) => { setData(result); setError(''); }).catch((problem) => setError(problem.message || 'Could not load the suggestions.'));
-  useEffect(() => { setData(null); load(); }, [audience, days, limits.minTimes, limits.minPeople]);
+  const [plansVersion, setPlansVersion] = useState(0);
+  // After planning a training, refresh the suggestions and the planned list.
+  const load = () => { setPlansVersion((value) => value + 1); return loadSuggestions(); };
+  const loadSuggestions = () => request(`/training-suggestions?audience=${audience}&days=${days}&minTimes=${limits.minTimes}&minPeople=${limits.minPeople}`).then((result) => { setData(result); setError(''); }).catch((problem) => setError(problem.message || 'Could not load the suggestions.'));
+  useEffect(() => { setData(null); loadSuggestions(); }, [audience, days, limits.minTimes, limits.minPeople]);
   const openPerson = (person) => (audience === 'hk' ? openProfile(person.name) : openSupervisor(person.ref, person.name));
   const suggested = data?.topics.filter((topic) => topic.suggested) || [];
   const others = data?.topics.filter((topic) => !topic.suggested) || [];
@@ -118,6 +122,7 @@ export function Training({ request, openProfile, openSupervisor, openReport, set
         {suggested.length ? <div className="training-topics">{suggested.map((topic) => <TopicCard key={topic.id} topic={topic} audience={audience} teamSize={data.teamSize} request={request} reload={load} openPerson={openPerson} openReport={openReport} setMessage={setMessage} />)}</div>
           : <Empty text={`No problem was written ${limits.minTimes} times or more, or about ${limits.minPeople} ${who} or more, in this period.`} />}
       </section>
+      <PlannedTrainings audience={audience} request={request} version={plansVersion} setMessage={setMessage} openPerson={openPerson} onChange={loadSuggestions} />
       {others.length > 0 && <section className="panel goals-section">
         <div className="panel-title"><div><p className="kicker">ALSO MENTIONED</p><h3>Not repeating enough to suggest yet</h3></div><button type="button" className="text" aria-expanded={showOthers} onClick={() => setShowOthers(!showOthers)}>{showOthers ? 'Hide' : `Show ${others.length}`}</button></div>
         {showOthers && <div className="training-topics">{others.map((topic) => <TopicCard key={topic.id} topic={topic} audience={audience} teamSize={data.teamSize} request={request} reload={load} openPerson={openPerson} openReport={openReport} setMessage={setMessage} />)}</div>}
