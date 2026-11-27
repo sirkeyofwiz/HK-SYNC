@@ -2358,3 +2358,22 @@ header { gap: 20px; }
 .plan-people li > button:last-child { padding: 2px; margin: 0; }
 @media (max-width: 700px) { .plan-row-body .training-plan-fields { grid-template-columns: 1fr 1fr; } .plan-row-body .training-plan-fields label:nth-child(3) { grid-column: 1 / -1; } }
 .plan-row-body .training-plan-fields label.wide { grid-column: 1 / -1; }
+
+/* Trainers, done trainings and My trainings */
+.plan-badges { display: inline-flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.plan-done { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; color: #4ade80; }
+.plan-mark-done { align-self: flex-start; margin: 0; }
+.done-form { display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--line); padding-top: 10px; }
+.done-form .kicker { margin: 0; }
+.done-form > label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; font-weight: 700; color: var(--slate); }
+.done-form > label input { width: 100%; max-width: none; box-sizing: border-box; }
+.training-plan-fields label small { font-weight: 400; }
+.my-training-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.my-training { border-top: 1px solid var(--line); padding: 10px 0; display: flex; flex-direction: column; gap: 6px; }
+.my-training:first-child { border-top: 0; }
+.my-training-head { display: flex; justify-content: space-between; align-items: start; gap: 8px; }
+.my-training-head > span:first-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.my-training-note { margin: 0; font-size: 13px; font-style: italic; color: var(--slate); }
+.my-training > .primary { align-self: flex-start; margin: 0; }
+.my-training.done { opacity: .8; }
+@media (min-width: 1100px) { .plan-row-body .training-plan-fields { grid-template-columns: 160px 160px minmax(0, 1fr) minmax(0, 1fr); } }

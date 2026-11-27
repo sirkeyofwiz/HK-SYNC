@@ -1305,6 +1305,11 @@ function trainingRemarks(audience, since, until) {
 }
 registerTraining(app, {
   database, authMiddleware, requireManager, support, today: () => dateInAppZone(0),
+  users: () => state.users,
+  notify: (userId, notification) => notify(userId, notification),
+  hour: () => Number(new Intl.DateTimeFormat('en-GB', { timeZone: APP_TIMEZONE, hour: '2-digit', hourCycle: 'h23' }).format(new Date())),
+  reminderCheckMs: Number(process.env.TRAINING_REMINDER_CHECK_MS) || 5 * 60 * 1000,
+  reminderFromHour: process.env.TRAINING_REMINDER_FROM_HOUR === undefined ? 7 : Number(process.env.TRAINING_REMINDER_FROM_HOUR),
   remarks: trainingRemarks,
   people: (audience) => (audience === 'hk' ? currentRoster().map((row) => row.name) : activeSupervisors().map((user) => user.name))
 });
@@ -2039,9 +2044,9 @@ function discussionIndex(userId) {
 // ---------- Notifications ----------
 // Every alert is stored (for the 🔔 list) and pushed to the person's devices unless they have the app open on screen,
 // it's their quiet hours (urgent tasks still come through), or they turned that kind of alert off.
-const NOTIFY_CATEGORY = { message: 'messages', question: 'questions', task: 'tasks', task_reminder: 'tasks', report_signed: 'reportSigned', report_flagged: 'reportFlagged', inspected: 'inspected', handover: 'handovers', reaction: 'reactions', laundry: 'laundry', laundry_reminder: 'laundry', stock: 'stock' };
+const NOTIFY_CATEGORY = { training: 'training', message: 'messages', question: 'questions', task: 'tasks', task_reminder: 'tasks', report_signed: 'reportSigned', report_flagged: 'reportFlagged', inspected: 'inspected', handover: 'handovers', reaction: 'reactions', laundry: 'laundry', laundry_reminder: 'laundry', stock: 'stock' };
 const DEFAULT_NOTIFY = {
-  categories: { messages: true, questions: true, tasks: true, reportSigned: true, reportFlagged: true, inspected: true, handovers: true, reactions: false, laundry: true, stock: true },
+  categories: { messages: true, questions: true, tasks: true, reportSigned: true, reportFlagged: true, inspected: true, handovers: true, reactions: false, laundry: true, stock: true, training: true },
   quietHours: { enabled: true, start: '22:00', end: '06:00' },
   preview: true,
   sound: true
