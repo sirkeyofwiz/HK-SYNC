@@ -14,7 +14,9 @@ const addDays = (iso, days) => new Date(Date.parse(`${iso}T00:00:00`) + days * 8
 
 function PlanForm({ topic, audience, request, done, cancel }) {
   const [chosen, setChosen] = useState(() => new Set(topic.people.map((person) => person.ref)));
-  const [form, setForm] = useState({ date: localToday(), followUp: addDays(localToday(), 30), notes: '' });
+  const [form, setForm] = useState({ date: localToday(), followUp: addDays(localToday(), 30), notes: '', trainerId: '' });
+  const [trainers, setTrainers] = useState([]);
+  useEffect(() => { request('/training-trainers').then((result) => setTrainers(result.trainers || [])).catch(() => {}); }, []);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const toggle = (ref) => setChosen((current) => { const next = new Set(current); if (next.has(ref)) next.delete(ref); else next.add(ref); return next; });
@@ -23,7 +25,7 @@ function PlanForm({ topic, audience, request, done, cancel }) {
     const people = topic.people.filter((person) => chosen.has(person.ref)).map(({ name, ref }) => ({ name, ref }));
     if (!people.length) return setError('Choose who takes part.');
     setSaving(true);
-    try { const result = await request('/training-plans', { method: 'POST', body: JSON.stringify({ audience, topicId: topic.id, people, ...form }) }); done(`${topic.label}: added to ${plural(result.created, 'support plan')}.`); } catch (problem) { setError(problem.message); } finally { setSaving(false); }
+    try { const result = await request('/training-plans', { method: 'POST', body: JSON.stringify({ audience, topicId: topic.id, people, ...form, trainerId: form.trainerId || null }) }); done(`${topic.label}: added to ${plural(result.created, 'support plan')}.`); } catch (problem) { setError(problem.message); } finally { setSaving(false); }
   };
   return <form className="training-plan" onSubmit={save}>
     <p className="kicker">PLAN THIS TRAINING</p>
@@ -31,7 +33,8 @@ function PlanForm({ topic, audience, request, done, cancel }) {
     <div className="training-plan-fields">
       <label>Training date<input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} required /></label>
       <label>Check again on<input type="date" min={form.date} value={form.followUp} onChange={(e) => setForm({ ...form, followUp: e.target.value })} /></label>
-      <label className="wide">Notes (optional)<input placeholder="e.g. morning briefing, trainer: Deograsia" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
+      <label>Who runs it<select value={form.trainerId} onChange={(e) => setForm({ ...form, trainerId: e.target.value })}><option value="">Nobody picked yet</option>{trainers.map((person) => <option key={person.id} value={person.id}>{((person) => `${person.name}${person.role === 'supervisor' ? '' : person.role === 'manager' ? ' (manager)' : ' (assistant manager)'}`)(person)}</option>)}</select><small className="muted">They are told now, the day before and on the day{audience === 'sup' ? ', like the supervisors taking part' : ''}.</small></label>
+      <label className="wide">Notes (optional)<input placeholder="e.g. morning briefing in the linen room" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
     </div>
     {error && <p className="error-text" role="alert">{error}</p>}
     <div className="training-plan-actions"><button type="button" className="text" onClick={cancel}>Cancel</button><button className="primary" disabled={saving}><Icon name="check" />{saving ? 'Saving…' : `Add to ${plural(chosen.size, 'support plan')}`}</button></div>

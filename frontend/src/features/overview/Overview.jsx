@@ -9,6 +9,7 @@ import { RemarksPanel } from './Remarks';
 import { HK_REPORT_TYPES, IRP_PASS, NOT_INSPECTIONS, NOT_ROOMS, TYPES } from '../../lib/constants';
 import { dayLabel, daysAgo, deadlineLabel, isoDate, localToday, plural, reportHousekeepers, shiftDays } from '../../lib/format';
 import { Icon } from '../../components/icons';
+import { MyTrainings } from '../training/MyTrainings';
 
 // One housekeeper on the Overview performance lists; tapping opens their profile.
 export function PerformanceRow({ row, tone, openProfile }) {
@@ -123,6 +124,7 @@ export function Overview({ reports, tasks, goals, staff, openReport, chooseType,
         {isManager && <RemarksPanel reports={reports} openReport={openReport} newTask={newTask} openHk={openHk} openSup={openSup} limit={3} openAll={() => { setPage('remarks'); window.scrollTo(0, 0); }} />}
       </div>
       <div className="dash-side">
+        <MyTrainings request={request} />
         {tasksPanel}
         {isManager && performance && <TeamCard performance={performance} openProfile={openProfile} openSupervisor={openSupervisor} openAll={() => { setPage('team'); window.scrollTo(0, 0); }} />}
         {isManager && goalsPanel}
